@@ -67,23 +67,23 @@ export async function GET(request: NextRequest) {
           updated_at: issue.updatedAt,
         }));
       return NextResponse.json({ issues });
-    } catch (err: unknown) {
-      const mapped = mapGitHubError(err);
-      // GraphQL returns 200 with errors array sometimes; if so, treat as 422 when query invalid
-      if (typeof err === 'object' && err && 'errors' in err) {
-        return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
-      }
-      if (mapped.status === 403) {
-        return NextResponse.json({ error: 'Token lacks Issues: read access for this repository' }, { status: 403 });
-      }
-      if (mapped.status === 404) {
-        return NextResponse.json({ error: 'Repository not found or inaccessible with this token' }, { status: 404 });
-      }
-      if (mapped.status === 422) {
-        return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
-      }
-      throw err;
+  } catch (err: unknown) {
+    const mapped = mapGitHubError(err);
+    // GraphQL returns 200 with errors array sometimes; if so, treat as 422 when query invalid
+    if (typeof err === 'object' && err && 'errors' in err) {
+      return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
     }
+    if (mapped.status === 403) {
+      return NextResponse.json({ error: 'Token lacks Issues: read access for this repository' }, { status: 403 });
+    }
+    if (mapped.status === 404) {
+      return NextResponse.json({ error: 'Repository not found or inaccessible with this token' }, { status: 404 });
+    }
+    if (mapped.status === 422) {
+      return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
+    }
+    throw err;
+  }
     // early return occurs in try above
   } catch (error) {
     console.error('Error searching issues:', error);
