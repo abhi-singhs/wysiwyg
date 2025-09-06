@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
         body: enhancedBody,
         labels: labels || [],
       });
-  } catch (err: unknown) {
+    } catch (err: unknown) {
       const mapped = mapGitHubError(err);
       if (mapped.status === 403) {
         return NextResponse.json({ error: 'Token lacks Issues: write access for this repository' }, { status: 403 });
