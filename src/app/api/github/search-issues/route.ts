@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       }
     `;
     try {
-  const data = await octokit.graphql<GqlSearchResult>(gql, { searchQuery, first: 5 });
+      const data = await octokit.graphql<GqlSearchResult>(gql, { searchQuery, first: 5 });
       const edges = data.search?.edges ?? [];
       const issues = edges
         .map(e => e.node)
