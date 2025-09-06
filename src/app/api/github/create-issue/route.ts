@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const owner = repoOwner || process.env.GITHUB_REPO_OWNER || 'github';
     const repo = repoName || process.env.GITHUB_REPO_NAME || 'solutions-engineering';
 
-  const octokit = createOctokit(token);
+    const octokit = createOctokit(token);
 
     // Get user info for attribution
     let userInfo = 'Unknown User';
