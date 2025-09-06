@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Octokit } from '@octokit/rest';
+import { createOctokit, mapGitHubError } from '@/lib/octokit';
+
+interface GqlIssueNode {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  updatedAt: string;
+}
+interface GqlSearchEdge { node?: GqlIssueNode }
+interface GqlSearchResult { search?: { edges?: GqlSearchEdge[] } }
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,30 +30,61 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Query parameter required' }, { status: 400 });
     }
 
-    const octokit = new Octokit({
-      auth: token,
-    });
+    const octokit = createOctokit(token);
 
-    const searchQuery = `repo:${repoOwner}/${repoName} ${query} in:title,body`;
-    
-    const response = await octokit.rest.search.issuesAndPullRequests({
-      q: searchQuery,
-      sort: 'updated',
-      order: 'desc',
-      per_page: 5,
-    });
-
-    const issues = response.data.items
-      .filter(item => !item.pull_request) // Only issues, not PRs
-      .map(issue => ({
-        number: issue.number,
-        title: issue.title,
-        url: issue.html_url,
-        state: issue.state,
-        updated_at: issue.updated_at,
-      }));
-
-    return NextResponse.json({ issues });
+    let searchQuery = `repo:${repoOwner}/${repoName} ${query} in:title,body`;
+    if (!/\bis:(issue|pull-request)\b/.test(searchQuery)) {
+      searchQuery += ' is:issue';
+    }
+    const gql = `
+      query($searchQuery: String!, $first: Int!) {
+        search(type: ISSUE, query: $searchQuery, first: $first) {
+          edges {
+            node {
+              ... on Issue {
+                number
+                title
+                url
+                state
+                updatedAt
+              }
+            }
+          }
+        }
+      }
+    `;
+    try {
+      const data = await octokit.graphql<GqlSearchResult>(gql, { searchQuery, first: 5 });
+      const edges = data.search?.edges ?? [];
+      const issues = edges
+        .map(e => e.node)
+        .filter((n): n is GqlIssueNode => !!n)
+        .map(issue => ({
+          number: issue.number,
+          title: issue.title,
+          url: issue.url,
+          state: issue.state,
+          updated_at: issue.updatedAt,
+        }));
+      return NextResponse.json({ issues });
+  } catch (err: unknown) {
+    const mapped = mapGitHubError(err);
+    // GraphQL returns 200 with errors array sometimes; if so, treat as 422 when query invalid
+    if (typeof err === 'object' && err && 'errors' in err) {
+      return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
+    }
+    if (mapped.status === 403) {
+      return NextResponse.json({ error: 'Token lacks Issues: read access for this repository' }, { status: 403 });
+    }
+    if (mapped.status === 404) {
+      return NextResponse.json({ error: 'Repository not found or inaccessible with this token' }, { status: 404 });
+    }
+    if (mapped.status === 422) {
+      return NextResponse.json({ error: 'Invalid search query.' }, { status: 422 });
+    }
+    throw err;
+  }
+    // early return occurs in try above
   } catch (error) {
     console.error('Error searching issues:', error);
     return NextResponse.json(
