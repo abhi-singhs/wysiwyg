@@ -19,6 +19,7 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 - **⚙️ Configurable repositories** - Switch between repositories on-the-fly
 - **📱 Responsive design** - Works great on desktop and tablet
 - **♿ Accessible** - WCAG AA compliant with proper focus management
+- **🤖 AI Markdown formatting** - One-click cleanup & structuring of raw notes via GitHub Models (GPT-4.1)
 
 ![Main Interface](https://github.com/user-attachments/assets/894d54aa-e857-4c8f-9cba-ae8cdc5862de)
 
@@ -124,6 +125,24 @@ The application includes these API endpoints:
 - `POST /api/github/create-issue` - Create new Issue with labels
 - `POST /api/github/add-comment` - Add comment to existing Issue
 - `GET /api/github/labels?owner=owner&repo=repo` - Fetch repository labels
+- `POST /api/github/format-notes` - Format raw notes into structured Markdown using the GitHub Models API (GPT-4.1)
+
+### AI Formatting
+Use the "AI Format" button above the notes textarea to:
+
+1. Send your in-progress raw notes to the GitHub Models API (model: `openai/gpt-4.1`).
+2. Receive a structured Markdown draft (Summary, Context, Steps, Findings, Next Actions, etc.).
+3. Preview the result in a modal with full Markdown rendering.
+4. Accept to replace your current notes or Cancel to keep editing.
+
+Implementation details:
+- Uses `@azure-rest/ai-inference` SDK pointed at `https://models.github.ai/inference`.
+- Reuses your provided GitHub PAT for authentication (no extra keys required).
+- Guards against empty input and very large notes (> ~8k chars pre-format).
+- Low temperature (0.2) for consistent, deterministic formatting.
+- Supports streaming preview: content appears progressively; you can stop mid-way and accept partial output.
+
+Your token is never stored server-side; it's only forwarded in-memory for the model call during the active request.
 
 ## Required GitHub Token Scopes
 
@@ -152,6 +171,12 @@ The application includes these API endpoints:
 - Generate a new token if needed
 
 ### Repository Not Found
+### AI Formatting Not Working
+- Ensure you are authenticated (PAT required for model access)
+- Notes must not be empty and should be under 8,000 characters
+- If the model response is empty or fails, try again after simplifying the raw notes
+- Check browser console for any network errors to `/api/github/format-notes`
+
 - Verify the repository owner and name are correct
 - Ensure your token has access to the repository
 - Check if the repository is private and your token has appropriate permissions

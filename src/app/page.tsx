@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun } from 'lucide-react';
+import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun, Wand2, X, Eye, EyeOff } from 'lucide-react';
+import { Markdown } from '../components/Markdown';
+import { useAIFormatter } from './useAIFormatter';
 
 interface Issue {
   number: number;
@@ -45,6 +47,11 @@ export default function Home() {
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error'; link?: string } | null>(null);
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [notePreview, setNotePreview] = useState(false); // markdown preview toggle
+  // AI preview default: show raw markdown source first (requested change)
+  const [showRaw, setShowRaw] = useState(true);
+  const { formatted: formattedMarkdown, isFormatting, error: aiError, start: startFormatting, abort: abortFormatting } = useAIFormatter({ token: pat, orgOwner: repoOwner });
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
     return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
@@ -52,6 +59,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const aiPreviewRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const labelDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -132,6 +140,7 @@ export default function Home() {
     }
     if (savedRepoOwner) setRepoOwner(savedRepoOwner);
     if (savedRepoName) setRepoName(savedRepoName);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- theme read on mount only
   }, [validatePat]); // Include validatePat dependency
 
   // Persist/apply theme when changed
@@ -149,10 +158,31 @@ export default function Home() {
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      const el = textareaRef.current;
+      el.style.height = 'auto';
+      const maxPx = 400; // ~20-22 lines depending on content
+      const needed = el.scrollHeight;
+      el.style.height = `${Math.min(needed, maxPx)}px`;
+      // If exceeding max, allow vertical scroll
+      if (needed > maxPx) {
+        el.style.overflowY = 'auto';
+      } else {
+        el.style.overflowY = 'hidden';
+      }
     }
   }, [note]);
+
+  // Auto scroll AI preview while streaming, but only if user is already near bottom
+  useEffect(() => {
+    if (!isFormatting) return; // only during live stream
+    const container = aiPreviewRef.current;
+    if (!container) return;
+    const threshold = 80; // px from bottom considered "at bottom"
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    if (atBottom) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [formattedMarkdown, isFormatting]);
 
   // Load labels when authenticated
   useEffect(() => {
@@ -301,6 +331,15 @@ export default function Home() {
       setIsSaving(false);
     }
   }, [note, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, user, pat, repoOwner, repoName]); // Include repo dependencies
+
+  const handleAIFormat = useCallback(() => {
+    if (!note.trim()) return showNotification('Nothing to format – notes are empty', 'error');
+    if (!pat) return showNotification('Authenticate with GitHub first', 'error');
+    // Ensure each new formatting session starts in raw mode
+    setShowRaw(true);
+    setShowAIModal(true);
+    startFormatting(note);
+  }, [note, pat, startFormatting]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -536,20 +575,54 @@ export default function Home() {
       <main className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-lg shadow-sm border">
           <div className="p-6">
-            {/* Notes Textarea */}
+            {/* Notes Textarea + AI Format */}
             <div className="mb-6">
               <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
                 Notes
               </label>
-              <textarea
-                id="notes"
-                ref={textareaRef}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Start typing your notes here... (Ctrl/Cmd+Enter to save)"
-                className="w-full p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px]"
-                rows={4}
-              />
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <p className="text-xs text-gray-500 flex-1">Raw notes you can later save as comment or issue.</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotePreview(p => !p)}
+                    aria-pressed={notePreview}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    aria-label={notePreview ? 'Switch to edit mode' : 'Switch to markdown preview'}
+                  >
+                    {notePreview ? 'Edit' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAIFormat}
+                    disabled={isFormatting || !note.trim()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    aria-label="Format notes with AI"
+                  >
+                    <Wand2 className="h-3.5 w-3.5" />
+                    {isFormatting ? 'Formatting…' : 'AI Format'}
+                  </button>
+                </div>
+              </div>
+              {notePreview ? (
+                <div className="w-full p-3 border border-gray-300 rounded-md bg-gray-50 prose prose-sm max-h-[400px] overflow-y-auto dark:bg-[var(--surface-subtle)] dark:prose-invert">
+                  {note.trim() ? (
+                    <Markdown source={note} />
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">Nothing to preview.</p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  id="notes"
+                  ref={textareaRef}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Start typing your notes here... (Ctrl/Cmd+Enter to save)"
+                  className="w-full p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] max-h-[400px] overflow-y-auto"
+                  rows={12}
+                />
+              )}
             </div>
 
             {/* Selected Labels - Always Visible */}
@@ -607,7 +680,7 @@ export default function Home() {
                 {/* Label Dropdown */}
                 {showLabelDropdown && filteredLabels.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-white dark:bg-[var(--surface)] border border-gray-300 dark:border-[var(--border)] rounded-md shadow-lg max-h-48 overflow-y-auto" role="listbox">
-                    {filteredLabels.map((label) => (
+          {filteredLabels.map((label) => (
                       <button
                         key={label.name}
                         onClick={() => {
@@ -616,6 +689,7 @@ export default function Home() {
                           setShowLabelDropdown(false);
                         }}
                         role="option"
+            aria-selected={false}
                         className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
                       >
                         <div
@@ -770,6 +844,86 @@ export default function Home() {
                 View on GitHub →
               </a>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* AI Preview Modal */}
+      {showAIModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="AI formatted notes preview"
+        >
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAIModal(false)} />
+          <div className="relative bg-white dark:bg-[var(--surface)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-[var(--border)]">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-[var(--foreground)]">AI Formatted Preview</h2>
+              <button
+                onClick={() => setShowAIModal(false)}
+                className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_70%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                aria-label="Close preview"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div ref={aiPreviewRef} className="overflow-y-auto p-5 prose prose-sm max-w-none dark:prose-invert">
+              {aiError && <div className="text-xs mb-2 text-red-600">{aiError}</div>}
+              {!formattedMarkdown && isFormatting && (
+                <div className="text-xs text-gray-500">Formatting in progress…</div>
+              )}
+              {formattedMarkdown && !showRaw && (
+                <Markdown source={formattedMarkdown} />
+              )}
+              {formattedMarkdown && showRaw && (
+                <pre
+                  className="text-xs whitespace-pre-wrap bg-gray-100 dark:bg-[var(--surface-subtle)] dark:text-[var(--foreground)] p-3 rounded-md border border-gray-200 dark:border-[var(--border)] overflow-x-auto max-h-[60vh] font-mono leading-relaxed"
+                >
+                  {formattedMarkdown}
+                </pre>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-200 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--surface-subtle)]">
+              {isFormatting ? (
+                <button
+                  onClick={() => abortFormatting()}
+                  className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  Stop
+                </button>
+              ) : (
+                formattedMarkdown && (
+                  <button
+                    onClick={() => setShowRaw(r => !r)}
+                    className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 inline-flex items-center gap-2"
+                  >
+                    {showRaw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showRaw ? 'Hide Raw' : 'Show Raw'}
+                  </button>
+                )
+              )}
+              <button
+                onClick={() => {
+                  abortFormatting();
+                  setShowAIModal(false);
+                }}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setNote(formattedMarkdown);
+                  setShowAIModal(false);
+                  showNotification('Applied AI formatting', 'success');
+                }}
+                disabled={!formattedMarkdown.trim() || isFormatting}
+                className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                {isFormatting && !formattedMarkdown ? 'Waiting…' : 'Accept & Replace'}
+              </button>
+            </div>
           </div>
         </div>
       )}

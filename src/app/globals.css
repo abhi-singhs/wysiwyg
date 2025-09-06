@@ -115,3 +115,43 @@ input:focus, textarea:focus, select:focus {
 .dark .border-gray-300 { border-color: var(--border) !important; }
 .dark .text-gray-700, .dark .text-gray-600, .dark .text-gray-500 { color: var(--text-muted) !important; }
 .dark .text-gray-900 { color: var(--foreground) !important; }
+
+/* GitHub-flavored markdown styling (scoped) */
+.markdown-body { --md-border: var(--border); --md-fg: var(--foreground); --md-muted: var(--text-muted); --md-accent: var(--accent); --md-surface: var(--surface); line-height:1.55; color:var(--md-fg); word-wrap:break-word; }
+.markdown-body a.md-anchor { opacity:0; margin-left:-1.1ch; padding-right:.25ch; text-decoration:none; color:var(--md-accent); }
+.markdown-body .md-heading { position:relative; scroll-margin-top: 80px; font-weight:600; line-height:1.25; }
+.markdown-body .md-heading:hover a.md-anchor { opacity:1; }
+.markdown-body h1.md-heading { font-size:1.6rem; margin:1.4em 0 .6em; border-bottom:1px solid var(--md-border); padding-bottom:.3em; }
+.markdown-body h2.md-heading { font-size:1.35rem; margin:1.2em 0 .6em; border-bottom:1px solid var(--md-border); padding-bottom:.25em; }
+.markdown-body h3.md-heading { font-size:1.15rem; margin:1.1em 0 .5em; }
+.markdown-body h4.md-heading { font-size:1rem; margin:1em 0 .4em; }
+.markdown-body h5.md-heading { font-size:.95rem; margin:.9em 0 .4em; }
+.markdown-body h6.md-heading { font-size:.85rem; margin:.8em 0 .4em; color:var(--md-muted); }
+.markdown-body p { margin: .75em 0; }
+.markdown-body strong { font-weight:600; }
+.markdown-body em { font-style:italic; }
+.markdown-body del { opacity:.75; }
+.markdown-body hr.md-hr { border:0; border-top:1px solid var(--md-border); margin:2rem 0; }
+.markdown-body pre.md-code-block { background: var(--surface-subtle); padding:.9rem 1rem; border:1px solid var(--md-border); border-radius:6px; overflow:auto; font-size:.75rem; line-height:1.4; }
+.markdown-body code.md-inline-code { background: var(--surface-subtle); padding:0 .35em; border:1px solid var(--md-border); border-radius:4px; font-size:.75rem; }
+.markdown-body blockquote.md-blockquote { margin:1em 0; padding:.6em .9em; border-left:4px solid var(--md-border); background:var(--surface-subtle); border-radius:0 6px 6px 0; color:var(--md-muted); }
+.markdown-body ul.md-list, .markdown-body ol.md-list { padding-left:1.4em; margin:.75em 0 .75em; }
+/* Re-enable list markers (Tailwind preflight removes them) */
+.markdown-body ul.md-list { list-style: disc outside; }
+.markdown-body ul.md-list ul.md-list { list-style: circle outside; }
+.markdown-body ul.md-list ul.md-list ul.md-list { list-style: square outside; }
+.markdown-body ol.md-list { list-style: decimal outside; }
+.markdown-body li.md-li { margin:.3em 0; }
+.markdown-body li.md-li > p { margin:.3em 0; }
+.markdown-body table { border-collapse: collapse; width:100%; font-size:.8rem; }
+.markdown-body .md-table-wrapper { overflow-x:auto; margin:1rem 0; }
+.markdown-body table th, .markdown-body table td { border:1px solid var(--md-border); padding:.5em .6em; text-align:left; }
+.markdown-body table th { background: var(--surface-subtle); font-weight:600; }
+.markdown-body img { max-width:100%; height:auto; }
+.markdown-body figure.md-image-wrapper { margin:1.2em 0; text-align:center; }
+.markdown-body .md-image-caption { font-size:.7rem; color:var(--md-muted); margin-top:.4em; }
+.markdown-body a.md-link { color: var(--md-accent); text-decoration: underline; text-underline-offset:2px; }
+.markdown-body a.md-link:hover { color: var(--accent-hover); }
+.markdown-body input[type=checkbox] { vertical-align:middle; margin-right:.4em; }
+.markdown-body :target.md-heading { background: var(--surface-subtle); }
+.dark .markdown-body :target.md-heading { background: var(--surface-subtle); }
