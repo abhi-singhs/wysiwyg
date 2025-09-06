@@ -667,13 +667,22 @@ export default function Home() {
                           setSuggestions([]);
                           setShowNewIssue(false);
                         }}
-                        className="w-full text-left p-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 cursor-pointer"
+                        className="w-full text-left p-3 border-b border-gray-100 last:border-b-0 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 hover:bg-gray-100 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_70%,black)] dark:bg-[var(--surface)]"
                       >
                         <div className="font-medium text-sm">#{issue.number}</div>
                         <div className="text-sm text-gray-600">{issue.title}</div>
                         {issue.state && (
-                          <div className={`text-xs mt-1 ${issue.state === 'open' ? 'text-green-600' : 'text-gray-500'}`}>
-                            {issue.state}
+                          <div
+                            className={`text-xs mt-1 font-medium tracking-wide ${
+                              issue.state.toLowerCase() === 'open'
+                                ? 'text-green-600'
+                                : issue.state.toLowerCase() === 'closed'
+                                  ? 'text-red-600'
+                                  : 'text-gray-500'
+                            }`}
+                            aria-label={`Issue is ${issue.state.toUpperCase()}`}
+                          >
+                            {issue.state.toUpperCase()}
                           </div>
                         )}
                       </button>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Octokit } from '@octokit/rest';
+import { createOctokit, mapGitHubError } from '@/lib/octokit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,16 +15,25 @@ export async function GET(request: NextRequest) {
     const repoOwner = searchParams.get('owner') || process.env.GITHUB_REPO_OWNER || 'github';
     const repoName = searchParams.get('repo') || process.env.GITHUB_REPO_NAME || 'solutions-engineering';
 
-    const octokit = new Octokit({
-      auth: token,
-    });
+    const octokit = createOctokit(token);
 
-    // Fetch all labels using Octokit's pagination
-    const labels = await octokit.paginate(octokit.rest.issues.listLabelsForRepo, {
-      owner: repoOwner,
-      repo: repoName,
-      per_page: 100,
-    });
+    let labels;
+    try {
+      labels = await octokit.paginate(octokit.rest.issues.listLabelsForRepo, {
+        owner: repoOwner,
+        repo: repoName,
+        per_page: 100,
+      });
+  } catch (err: unknown) {
+      const mapped = mapGitHubError(err);
+      if (mapped.status === 403) {
+        return NextResponse.json({ error: 'Token lacks Issues: read access for this repository' }, { status: 403 });
+      }
+      if (mapped.status === 404) {
+        return NextResponse.json({ error: 'Repository not found or inaccessible with this token' }, { status: 404 });
+      }
+      throw err;
+    }
 
     const formattedLabels = labels.map(label => ({
       name: label.name,
