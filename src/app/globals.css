@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
+/* Base design tokens (light theme defaults) */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --surface: #ffffff;
+  --surface-subtle: #f5f7fa;
+  --border: #d0d5dd;
+  --border-strong: #98a2b3;
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --text-muted: #475467; /* WCAG AA on white */
+  --text-placeholder: #667085; /* passes placeholder contrast */
+  --focus-ring: #2563eb;
 }
 
 @theme inline {
@@ -13,14 +23,95 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light) {
     --background: #0a0a0a;
-    --foreground: #ededed;
+    --foreground: #f5f5f5;
+    --surface: #161616;
+    --surface-subtle: #1e1e1e;
+    --border: #333741;
+    --border-strong: #4d5562;
+    --accent: #3b82f6;
+    --accent-hover: #1d4ed8;
+    --text-muted: #d0d4db;
+    --text-placeholder: #9da4ae;
+    --focus-ring: #3b82f6;
   }
 }
+
+/* Explicit dark mode class (overrides system preference). Applied to <html class="dark"> via JS */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --surface: #161616;
+  --surface-subtle: #1e1e1e;
+  --border: #333741;
+  --border-strong: #4d5562;
+  --accent: #3b82f6;
+  --accent-hover: #1d4ed8;
+  --text-muted: #d0d4db;
+  --text-placeholder: #9da4ae;
+  --focus-ring: #3b82f6;
+}
+
+/* Force light mode even if system prefers dark */
+.light {
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface: #ffffff;
+  --surface-subtle: #f5f7fa;
+  --border: #d0d5dd;
+  --border-strong: #98a2b3;
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --text-muted: #475467;
+  --text-placeholder: #667085;
+  --focus-ring: #2563eb;
+}
+
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+/* Form elements */
+input, textarea, select {
+  background-color: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1; /* ensure color is not faded */
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 60%, transparent);
+}
+
+/* Muted text utility */
+.text-muted { color: var(--text-muted); }
+
+/* Surfaces (can be mapped via utility classes if desired) */
+.surface { background-color: var(--surface); }
+.surface-subtle { background-color: var(--surface-subtle); }
+
+/* Override Tailwind gray backgrounds for better dark mode contrast when user relies on system preference */
+@media (prefers-color-scheme: dark) {
+  .bg-white { background-color: var(--surface) !important; }
+  .bg-gray-50 { background-color: var(--surface-subtle) !important; }
+  .border-gray-300 { border-color: var(--border) !important; }
+  .text-gray-700, .text-gray-600, .text-gray-500 { color: var(--text-muted) !important; }
+  .text-gray-900 { color: var(--foreground) !important; }
+}
+
+/* When using explicit .dark class, ensure same overrides (higher specificity) */
+.dark .bg-white { background-color: var(--surface) !important; }
+.dark .bg-gray-50 { background-color: var(--surface-subtle) !important; }
+.dark .border-gray-300 { border-color: var(--border) !important; }
+.dark .text-gray-700, .dark .text-gray-600, .dark .text-gray-500 { color: var(--text-muted) !important; }
+.dark .text-gray-900 { color: var(--foreground) !important; }
