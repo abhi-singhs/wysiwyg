@@ -6,7 +6,7 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 
 **Ready to use immediately** - No installation required! Just visit [quicknotes.gupta-kartik.com](https://quicknotes.gupta-kartik.com) and start capturing notes.
 
-![Quick Notes Authentication Screen](https://github.com/user-attachments/assets/7e25adf6-c698-41d3-9ef3-88c9c815dc5d)
+![Login Page](public/login.png)
 
 ## Features
 
@@ -20,6 +20,12 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 - **📱 Responsive design** - Works great on desktop and tablet
 - **♿ Accessible** - WCAG AA compliant with proper focus management
 - **🤖 AI Markdown formatting** - One-click cleanup & structuring of raw notes via GitHub Models (GPT-4.1)
+ - **🤖 AI Markdown formatting** - One-click cleanup & structuring of raw notes via GitHub Models (GPT-4.1)
+ - **📌 Project linking (Projects V2)** - Paste a GitHub Project URL to link (captures node id)
+ - **🧩 Automatic project assignment** - Issues & commented Issues auto-added to linked Project
+ - **📊 Project Status control** - Status dropdown (In Progress / No Status / Done) applied on create & comment
+ - **🙋 Self-assignment** - New Issues automatically assign the authenticated user (best-effort)
+ - **🗃️ Local persistence** - Repo, project, status, theme cached (cleared on logout)
 
 ![Main Interface](https://github.com/user-attachments/assets/894d54aa-e857-4c8f-9cba-ae8cdc5862de)
 
@@ -68,9 +74,10 @@ To use the app (live or locally), you'll need a GitHub PAT:
 1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens/new)
 2. Click "Generate new token (classic)"
 3. Give it a name like "Quick Notes App"
-4. Select these scopes:
-   - `repo` - Full control of repositories
-   - `read:user` - Read user profile data
+4. Select these scopes (minimum):
+   - `repo` – create/search issues, labels
+   - `read:user` – attribution & self-assignment
+   - `project` (or fine‑grained project access) – required for Project linking & status updates
 5. Click "Generate token" and copy it
 6. Enter it in the app when prompted
 
@@ -93,12 +100,28 @@ To use the app (live or locally), you'll need a GitHub PAT:
 2. **Click "Create new issue"**
 3. **Enter a title** for the Issue
 4. **Select labels** from the available options
-5. **Save** to create the Issue with your notes as the description
+5. (Optional) Pick a **Status** (if a Project is linked) near Labels
+6. **Save** – Issue is created, self-assigned, added to Project, status applied
 
-### Repository Configuration
+### Repository & Project Configuration
 - **Settings Panel**: Click the settings icon in the header
-- **Change on-the-fly**: Switch repositories without restarting
-- **Persistent**: Settings are saved in browser storage
+- **Change on-the-fly**: Switch repositories instantly
+- **Project Link**: Paste `https://github.com/orgs/<org>/projects/<number>` and Link
+- **Default Status**: Choose Status for new/updated items (In Progress / No Status / Done)
+- **Persistent**: Stored in localStorage & cleared on logout
+
+#### Stored Keys (localStorage)
+| Key | Purpose |
+| --- | --- |
+| `github-pat` | Personal Access Token |
+| `repo-owner` | Repository owner |
+| `repo-name` | Repository name |
+| `project-url` | Linked Project URL |
+| `project-name` | Project name |
+| `project-number` | Project number |
+| `project-node-id` | GraphQL node id for mutations |
+| `project-status` | Preferred default Status |
+| `theme` | UI theme |
 
 ## Development Setup
 
@@ -122,10 +145,11 @@ The application includes these API endpoints:
 
 - `GET /api/github/user` - Validate PAT and get user info
 - `GET /api/github/search-issues?q=query&owner=owner&repo=repo` - Search repository Issues  
-- `POST /api/github/create-issue` - Create new Issue with labels
-- `POST /api/github/add-comment` - Add comment to existing Issue
+- `POST /api/github/create-issue` - Create Issue (labels, self-assign, optional project + status)
+- `POST /api/github/add-comment` - Add comment (optional project add + status)
 - `GET /api/github/labels?owner=owner&repo=repo` - Fetch repository labels
 - `POST /api/github/format-notes` - Format raw notes into structured Markdown using the GitHub Models API (GPT-4.1)
+ - `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
 
 ### AI Formatting
 Use the "AI Format" button above the notes textarea to:
@@ -146,15 +170,17 @@ Your token is never stored server-side; it's only forwarded in-memory for the mo
 
 ## Required GitHub Token Scopes
 
-- **`repo`**: Required to create issues, add comments, and search issues
-- **`read:user`**: Required to get user information for attribution
+Minimal:
+- `repo`
+- `read:user`
+- `project` (or fine‑grained: project + issues access)
 
 ## Security Features
 
-- **PAT Authentication** - Simple and secure token-based authentication
-- **Client-side storage** - Token stored in browser localStorage only
-- **API Protection** - All GitHub API routes require valid token
-- **Easy revocation** - Users can revoke/rotate tokens anytime in GitHub settings
+- **PAT Authentication** - No server persistence
+- **Client-side storage** - Token & settings in localStorage only
+- **API Protection** - All GitHub routes require bearer token
+- **Easy revocation** - Revoke PAT in GitHub anytime
 
 ## Accessibility
 
@@ -171,15 +197,22 @@ Your token is never stored server-side; it's only forwarded in-memory for the mo
 - Generate a new token if needed
 
 ### Repository Not Found
-### AI Formatting Not Working
-- Ensure you are authenticated (PAT required for model access)
-- Notes must not be empty and should be under 8,000 characters
-- If the model response is empty or fails, try again after simplifying the raw notes
-- Check browser console for any network errors to `/api/github/format-notes`
+- Check owner/name spelling
+- Token must include repo access (private repo permissions)
 
-- Verify the repository owner and name are correct
-- Ensure your token has access to the repository
-- Check if the repository is private and your token has appropriate permissions
+### Project Not Linking
+- PAT must include project scope / access
+- URL must match `https://github.com/orgs/<org>/projects/<number>`
+
+### Status Not Updating
+- Project needs a single-select field named `Status`
+- Options must include: In Progress, No Status, Done
+
+### AI Formatting Not Working
+- Must be authenticated
+- Notes not empty & < ~8k chars
+- Retry after trimming / simplifying
+- Check network console for `/api/github/format-notes`
 
 ## Contributing
 

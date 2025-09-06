@@ -33,6 +33,12 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [repoOwner, setRepoOwner] = useState('github');
   const [repoName, setRepoName] = useState('solutions-engineering');
+  // Project (ProjectV2) association via URL
+  const [projectUrl, setProjectUrl] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectNumber, setProjectNumber] = useState<number | null>(null);
+  const [projectNodeId, setProjectNodeId] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<'in-progress' | 'no-status' | 'done'>('in-progress');
 
   const [note, setNote] = useState('');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -133,6 +139,11 @@ export default function Home() {
     const savedPat = localStorage.getItem('github-pat');
     const savedRepoOwner = localStorage.getItem('repo-owner');
     const savedRepoName = localStorage.getItem('repo-name');
+    const savedProjectUrl = localStorage.getItem('project-url');
+    const savedProjectName = localStorage.getItem('project-name');
+  const savedProjectNumber = localStorage.getItem('project-number');
+  const savedProjectNodeId = localStorage.getItem('project-node-id');
+  const savedProjectStatus = localStorage.getItem('project-status');
     
     if (savedPat) {
       setPat(savedPat);
@@ -140,6 +151,13 @@ export default function Home() {
     }
     if (savedRepoOwner) setRepoOwner(savedRepoOwner);
     if (savedRepoName) setRepoName(savedRepoName);
+    if (savedProjectUrl) setProjectUrl(savedProjectUrl);
+    if (savedProjectName) setProjectName(savedProjectName);
+  if (savedProjectNumber) setProjectNumber(parseInt(savedProjectNumber, 10));
+    if (savedProjectNodeId) setProjectNodeId(savedProjectNodeId);
+    if (savedProjectStatus === 'in-progress' || savedProjectStatus === 'no-status' || savedProjectStatus === 'done') {
+      setProjectStatus(savedProjectStatus);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- theme read on mount only
   }, [validatePat]); // Include validatePat dependency
 
@@ -200,6 +218,14 @@ export default function Home() {
     setPat('');
     setUser(null);
     localStorage.removeItem('github-pat');
+    localStorage.removeItem('project-url');
+    localStorage.removeItem('project-name');
+  localStorage.removeItem('project-number');
+  localStorage.removeItem('project-node-id');
+  localStorage.removeItem('project-status');
+  // Legacy keys cleanup (older implementation used these)
+  localStorage.removeItem('project');
+  localStorage.removeItem('project-id');
     setNote('');
     setSelectedIssue(null);
     setShowNewIssue(false);
@@ -208,11 +234,21 @@ export default function Home() {
     setLabelSearchQuery('');
     setShowLabelDropdown(false);
     setSearchQuery('');
+    setProjectUrl('');
+    setProjectName('');
+  setProjectNumber(null);
+  setProjectNodeId(null);
+  setProjectStatus('in-progress');
   };
 
   const updateRepoSettings = () => {
     localStorage.setItem('repo-owner', repoOwner);
     localStorage.setItem('repo-name', repoName);
+    if (projectUrl) localStorage.setItem('project-url', projectUrl); else localStorage.removeItem('project-url');
+    if (projectName) localStorage.setItem('project-name', projectName); else localStorage.removeItem('project-name');
+  if (projectNumber != null) localStorage.setItem('project-number', String(projectNumber)); else localStorage.removeItem('project-number');
+  if (projectNodeId) localStorage.setItem('project-node-id', projectNodeId); else localStorage.removeItem('project-node-id');
+  if (projectStatus) localStorage.setItem('project-status', projectStatus); else localStorage.removeItem('project-status');
     setShowSettings(false);
     if (user && pat) {
       fetchLabels(); // Refresh labels for new repo
@@ -267,7 +303,7 @@ export default function Home() {
     try {
       if (showNewIssue) {
         // Create new issue
-        const response = await fetch('/api/github/create-issue', {
+    const response = await fetch('/api/github/create-issue', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -279,6 +315,8 @@ export default function Home() {
             labels: selectedLabels,
             repoOwner,
             repoName,
+      projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
           }),
         });
 
@@ -290,7 +328,7 @@ export default function Home() {
         }
       } else if (selectedIssue) {
         // Add comment to existing issue
-        const response = await fetch('/api/github/add-comment', {
+    const response = await fetch('/api/github/add-comment', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -301,6 +339,8 @@ export default function Home() {
             body: note,
             repoOwner,
             repoName,
+      projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
           }),
         });
 
@@ -330,7 +370,7 @@ export default function Home() {
     } finally {
       setIsSaving(false);
     }
-  }, [note, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, user, pat, repoOwner, repoName]); // Include repo dependencies
+  }, [note, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, user, pat, repoOwner, repoName, projectNodeId, projectStatus]); // Include repo dependencies
 
   const handleAIFormat = useCallback(() => {
     if (!note.trim()) return showNotification('Nothing to format – notes are empty', 'error');
@@ -365,6 +405,66 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const parseProjectUrl = (url: string) => {
+    // Expected formats: https://github.com/orgs/<org>/projects/<number>[/...] or https://github.com/orgs/<org>/projects/<number>/views/<id>
+    try {
+      const u = new URL(url.trim());
+      if (u.hostname !== 'github.com') return null;
+      const parts = u.pathname.split('/').filter(Boolean);
+      const orgsIdx = parts.indexOf('orgs');
+      if (orgsIdx === -1 || parts.length < orgsIdx + 4) return null;
+      const org = parts[orgsIdx + 1];
+      if (parts[orgsIdx + 2] !== 'projects') return null;
+      const number = parseInt(parts[orgsIdx + 3], 10);
+      if (Number.isNaN(number)) return null;
+      return { org, number };
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchProjectFromUrl = async () => {
+    if (!projectUrl.trim()) {
+      showNotification('Enter a GitHub Project URL', 'error');
+      return;
+    }
+    const parsed = parseProjectUrl(projectUrl);
+    if (!parsed) {
+      showNotification('Invalid project URL format', 'error');
+      return;
+    }
+    if (!pat) {
+      showNotification('Authenticate first', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/github/project?org=${encodeURIComponent(parsed.org)}&number=${parsed.number}`, {
+        headers: { Authorization: `Bearer ${pat}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProjectName(data.project.name);
+        setProjectNumber(data.project.number || null);
+        if (data.project.id) {
+          setProjectNodeId(data.project.id);
+          localStorage.setItem('project-node-id', data.project.id);
+        }
+        // Persist immediately
+        localStorage.setItem('project-url', projectUrl);
+        localStorage.setItem('project-name', data.project.name || '');
+  if (data.project.number != null) localStorage.setItem('project-number', String(data.project.number));
+        showNotification('Project linked', 'success');
+      } else {
+        const err = await res.json();
+        showNotification(err.error || 'Failed to fetch project', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to fetch project', 'error');
+    }
+  };
+
+  // Unauthenticated UI
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -398,7 +498,7 @@ export default function Home() {
                   type="password"
                   value={pat}
                   onChange={(e) => setPat(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
@@ -423,13 +523,13 @@ export default function Home() {
 
           <div className="mt-6 text-xs text-gray-500 space-y-2">
             <p>
-              <strong>Required scopes:</strong> <code>repo</code>, <code>read:user</code>
+              <strong>Required scopes:</strong> <code>issues</code>, <code>organization_models</code>, <code>organization_projects</code>
             </p>
             <p>
               Create a token at{' '}
-              <a 
-                href="https://github.com/settings/tokens/new" 
-                target="_blank" 
+              <a
+                href={`https://github.com/settings/personal-access-tokens/new?target_name=${repoOwner}&description=Used+for+QuickNotes&name=GitHub+QuickNotes+token&metadata=read&issues=write&organization_models=read&organization_projects=write`}
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:text-blue-800"
               >
@@ -448,37 +548,55 @@ export default function Home() {
             </button>
             
             {showSettings && (
-              <div className="mt-3 space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Owner
-                  </label>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Owner</label>
                   <input
                     type="text"
                     value={repoOwner}
                     onChange={(e) => setRepoOwner(e.target.value)}
-                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="github"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Name
-                  </label>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Name</label>
                   <input
                     type="text"
                     value={repoName}
                     onChange={(e) => setRepoName(e.target.value)}
-                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="solutions-engineering"
                   />
                 </div>
-                <button
-                  onClick={updateRepoSettings}
-                  className="w-full bg-blue-600 text-white px-3 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
-                >
-                  Save Settings
-                </button>
+                <div className="flex flex-col sm:col-span-2">
+                  <label className="text-xs font-medium text-gray-700 mb-1">GitHub Project URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={projectUrl}
+                      onChange={(e) => setProjectUrl(e.target.value)}
+                      placeholder="https://github.com/orgs/my-org/projects/123"
+                      className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchProjectFromUrl}
+                      className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                    >Link</button>
+                  </div>
+                  {projectName && (
+                    <p className="mt-1 text-xs text-gray-600">Linked: <span className="font-medium">{projectName}</span>{projectNumber !== null && ` (#${projectNumber})`}</p>
+                  )}
+                </div>
+                <div className="sm:col-span-2">
+                  <button
+                    onClick={updateRepoSettings}
+                    className="w-full bg-blue-600 text-white px-3 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
+                  >
+                    Save Settings
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -531,11 +649,9 @@ export default function Home() {
         {showSettings && (
           <div className="border-t bg-gray-50 px-4 py-3">
             <div className="max-w-4xl mx-auto">
-              <div className="flex items-center gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Owner
-                  </label>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Owner</label>
                   <input
                     type="text"
                     value={repoOwner}
@@ -544,10 +660,8 @@ export default function Home() {
                     placeholder="github"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Name
-                  </label>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Name</label>
                   <input
                     type="text"
                     value={repoName}
@@ -556,11 +670,40 @@ export default function Home() {
                     placeholder="solutions-engineering"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">&nbsp;</label>
+                <div className="flex flex-col md:col-span-2">
+                  <label className="text-xs font-medium text-gray-700 mb-1">GitHub Project URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={projectUrl}
+                      onChange={(e) => setProjectUrl(e.target.value)}
+                      placeholder="https://github.com/orgs/my-org/projects/123"
+                      className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchProjectFromUrl}
+                      className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                    >Link</button>
+                  </div>
+                  {projectName && (
+                    <p className="mt-1 text-[11px] text-gray-600">{projectName}{projectNumber !== null && ` (#${projectNumber})`}</p>
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Project Number</label>
+                  <input
+                    type="number"
+                    value={projectNumber !== null ? projectNumber : ''}
+                    onChange={(e) => setProjectNumber(e.target.value ? parseInt(e.target.value, 10) : null)}
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="123"
+                  />
+                </div>
+                <div className="md:col-span-5 flex justify-end">
                   <button
                     onClick={updateRepoSettings}
-                    className="bg-blue-600 text-white px-4 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
+                    className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                   >
                     Update
                   </button>
@@ -659,51 +802,69 @@ export default function Home() {
               </div>
             )}
 
-            {/* Label Search */}
+            {/* Label Search + Status (if project) */}
             <div className="mb-6" ref={labelDropdownRef}>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Add Labels
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={labelSearchQuery}
-                  onChange={(e) => {
-                    setLabelSearchQuery(e.target.value);
-                    setShowLabelDropdown(true);
-                  }}
-                  onFocus={() => setShowLabelDropdown(true)}
-                  placeholder="Type to search labels..."
-                  className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                
-                {/* Label Dropdown */}
-                {showLabelDropdown && filteredLabels.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white dark:bg-[var(--surface)] border border-gray-300 dark:border-[var(--border)] rounded-md shadow-lg max-h-48 overflow-y-auto" role="listbox">
-          {filteredLabels.map((label) => (
-                      <button
-                        key={label.name}
-                        onClick={() => {
-                          setSelectedLabels([...selectedLabels, label.name]);
-                          setLabelSearchQuery('');
-                          setShowLabelDropdown(false);
-                        }}
-                        role="option"
-            aria-selected={false}
-                        className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: `#${label.color}` }}
-                        />
-                        <div>
-                          <div className="font-medium text-sm leading-snug">{label.name}</div>
-                          {label.description && (
-                            <div className="text-xs text-gray-500 dark:text-[var(--text-muted)] leading-snug">{label.description}</div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+              <div className="flex items-end gap-4 mb-2">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Add Labels
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={labelSearchQuery}
+                      onChange={(e) => {
+                        setLabelSearchQuery(e.target.value);
+                        setShowLabelDropdown(true);
+                      }}
+                      onFocus={() => setShowLabelDropdown(true)}
+                      placeholder="Type to search labels..."
+                      className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {/* Label Dropdown */}
+                    {showLabelDropdown && filteredLabels.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-[var(--surface)] border border-gray-300 dark:border-[var(--border)] rounded-md shadow-lg max-h-48 overflow-y-auto" role="listbox">
+                        {filteredLabels.map((label) => (
+                          <button
+                            key={label.name}
+                            onClick={() => {
+                              setSelectedLabels([...selectedLabels, label.name]);
+                              setLabelSearchQuery('');
+                              setShowLabelDropdown(false);
+                            }}
+                            role="option"
+                            aria-selected={false}
+                            className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: `#${label.color}` }}
+                            />
+                            <div>
+                              <div className="font-medium text-sm leading-snug">{label.name}</div>
+                              {label.description && (
+                                <div className="text-xs text-gray-500 dark:text-[var(--text-muted)] leading-snug">{label.description}</div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {projectNodeId && (
+                  <div className="w-44">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                    <select
+                      value={projectStatus}
+                      onChange={(e) => setProjectStatus(e.target.value as 'in-progress' | 'no-status' | 'done')}
+                      className="w-full h-12 px-3 border border-gray-300 rounded-md bg-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      style={{ lineHeight: '1.25rem' }}
+                    >
+                      <option value="in-progress">In Progress</option>
+                      <option value="no-status">No Status</option>
+                      <option value="done">Done</option>
+                    </select>
                   </div>
                 )}
               </div>
@@ -711,19 +872,24 @@ export default function Home() {
 
             {/* Issue Selection */}
             <div className="mb-6">
-              <label htmlFor="issue-search" className="block text-sm font-medium text-gray-700 mb-2">
-                Issue
-              </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <input
-                  id="issue-search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search for existing issues..."
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+              <div className="flex items-end gap-4 mb-2">
+                <div className="flex-1">
+                  <label htmlFor="issue-search" className="block text-sm font-medium text-gray-700 mb-2">
+                    Issue
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      id="issue-search"
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search for existing issues..."
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                {/* Status dropdown moved above into label row */}
               </div>
 
               {/* Issue Suggestions */}
