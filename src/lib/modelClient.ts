@@ -1,7 +1,8 @@
 import ModelClient from '@azure-rest/ai-inference';
 import { AzureKeyCredential } from '@azure/core-auth';
 
-const DEFAULT_MODEL_ID = 'openai/gpt-4.1';
+// Default model (mirrors previous hard-coded value)
+export const DEFAULT_MODEL_ID = 'openai/gpt-4.1';
 
 export interface ModelClientConfig {
   token: string;
@@ -16,6 +17,7 @@ export function createModelClient({ token, modelId, orgOwner }: ModelClientConfi
   return { client, model: modelId || DEFAULT_MODEL_ID, endpoint };
 }
 
+// Default system prompt (exported so UI can show & reset)
 export const MODEL_SYSTEM_PROMPT = `You are an assistant that reformats raw, messy engineering meeting or troubleshooting notes into clean, concise, well-structured GitHub issue/comment ready Markdown.
 
 Guidelines:
@@ -30,9 +32,18 @@ Guidelines:
 
 Return ONLY the Markdown body; no surrounding commentary.`;
 
-export function buildMessages(content: string) {
+export function buildMessages(content: string, systemPrompt?: string) {
   return [
-    { role: 'system', content: MODEL_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt || MODEL_SYSTEM_PROMPT },
     { role: 'user', content },
   ];
 }
+
+// Curated list of common model ids (could later be fetched dynamically from models API)
+export const AVAILABLE_MODELS: { id: string; label: string }[] = [
+  { id: 'openai/gpt-4.1', label: 'OpenAI GPT-4.1' },
+  { id: 'openai/gpt-4o-mini', label: 'OpenAI GPT-4o Mini' },
+  { id: 'meta-llama/llama-3.1-70b-instruct', label: 'LLaMA 3.1 70B Instruct' },
+  { id: 'meta-llama/llama-3.1-8b-instruct', label: 'LLaMA 3.1 8B Instruct' },
+  { id: 'mistral/mistral-large', label: 'Mistral Large' },
+];

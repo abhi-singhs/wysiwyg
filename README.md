@@ -10,24 +10,25 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 
 ## Features
 
-- **🚀 Lightning-fast note capture** - Minimal UI focused on speed
-- **🔍 Smart Issue search** - Auto-suggest Issues based on keywords with debounced search
-- **💾 Seamless GitHub integration** - Save notes as comments or create new Issues
-- **🏷️ Label management** - Select from repository labels when creating Issues
-- **⌨️ Keyboard shortcuts** - Ctrl/Cmd+Enter to save instantly
-- **🔑 Simple authentication** - GitHub Personal Access Token (no OAuth setup needed)
-- **⚙️ Configurable repositories** - Switch between repositories on-the-fly
-- **📱 Responsive design** - Works great on desktop and tablet
-- **♿ Accessible** - WCAG AA compliant with proper focus management
-- **🤖 AI Markdown formatting** - One-click cleanup & structuring of raw notes via GitHub Models (GPT-4.1)
- - **🤖 AI Markdown formatting** - One-click cleanup & structuring of raw notes via GitHub Models (GPT-4.1)
- - **📌 Project linking (Projects V2)** - Paste a GitHub Project URL to link (captures node id)
- - **🧩 Automatic project assignment** - Issues & commented Issues auto-added to linked Project
- - **📊 Project Status control** - Status dropdown (In Progress / No Status / Done) applied on create & comment
- - **🙋 Self-assignment** - New Issues automatically assign the authenticated user (best-effort)
- - **🗃️ Local persistence** - Repo, project, status, theme cached (cleared on logout)
+- **🚀 Lightning-fast note capture** – Minimal UI focused on speed
+- **🔍 Smart Issue search** – Debounced search with live suggestions
+- **💾 GitHub integration** – Save notes as Issue comments or create new Issues
+- **🏷️ Label management** – Pick from repository labels
+- **📌 Project (Projects V2) linking** – Paste a Project URL to associate issues
+- **🧩 Auto project assignment** – Issues & comments auto-added when linked
+- **📊 Status control** – Apply project Status (In Progress / No Status / Done)
+- **� Self-assignment** – New issues auto assign the authenticated user
+- **🤖 AI Markdown formatting** – Streaming cleanup via GitHub Models
+- **⚙️ AI settings panel** – Choose model + customize system prompt (persisted locally)
+- **🔄 Dynamic model list** – Fetched from public GitHub Models catalog with fallback
+- **�️ Local persistence** – Repo, project, AI prefs, theme retained (cleared on logout)
+- **⌨️ Keyboard shortcuts** – Ctrl/Cmd+Enter to save
+- **🌓 Theme toggle** – Light/Dark persisted per device
+- **🎯 Instant tooltips** – Fast `[data-tip]` tooltips for all action buttons
+- **♿ Accessibility first** – Focus rings, ARIA labeling, semantic structure
+- **� Responsive** – Desktop & tablet friendly
 
-![Main Interface](https://github.com/user-attachments/assets/894d54aa-e857-4c8f-9cba-ae8cdc5862de)
+![Home Page](public/home.png)
 
 ## Quick Start
 
@@ -56,7 +57,7 @@ Visit `http://localhost:3000` for local development.
 4. **Quick label selection** - Multi-select from predefined repository labels
 5. **Simple authentication** - GitHub Personal Access Token for quick setup
 
-![New Issue Creation](https://github.com/user-attachments/assets/3377ae0c-d513-4896-a399-2edc4fde0050)
+![New Issue Creation](public/new-issue.png)
 
 ## Tech Stack
 
@@ -71,13 +72,13 @@ Visit `http://localhost:3000` for local development.
 
 To use the app (live or locally), you'll need a GitHub PAT:
 
-1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens/new)
-2. Click "Generate new token (classic)"
+1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/personal-access-tokens/new)
+2. Click "Generate new token"
 3. Give it a name like "Quick Notes App"
 4. Select these scopes (minimum):
-   - `repo` – create/search issues, labels
-   - `read:user` – attribution & self-assignment
-   - `project` (or fine‑grained project access) – required for Project linking & status updates
+   - `issue` – create/search issues, labels
+   - `organization_projects` fine‑grained: access to Issues + Projects
+   - `organization_models:read`
 5. Click "Generate token" and copy it
 6. Enter it in the app when prompted
 
@@ -121,7 +122,9 @@ To use the app (live or locally), you'll need a GitHub PAT:
 | `project-number` | Project number |
 | `project-node-id` | GraphQL node id for mutations |
 | `project-status` | Preferred default Status |
-| `theme` | UI theme |
+| `ai-model` | Selected AI model id |
+| `ai-system-prompt` | Custom system prompt override |
+| `theme` | UI theme (light/dark) |
 
 ## Development Setup
 
@@ -148,10 +151,12 @@ The application includes these API endpoints:
 - `POST /api/github/create-issue` - Create Issue (labels, self-assign, optional project + status)
 - `POST /api/github/add-comment` - Add comment (optional project add + status)
 - `GET /api/github/labels?owner=owner&repo=repo` - Fetch repository labels
-- `POST /api/github/format-notes` - Format raw notes into structured Markdown using the GitHub Models API (GPT-4.1)
- - `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
+- `POST /api/github/format-notes` - Format raw notes into structured Markdown (streaming)
+- `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
+- `GET /api/github/models` - Fetch dynamic model catalog (public GitHub Models) with simplification
+- `GET /api/github/config` - Static config + fallback metadata
 
-### AI Formatting
+### AI Formatting & AI Settings
 Use the "AI Format" button above the notes textarea to:
 
 1. Send your in-progress raw notes to the GitHub Models API (model: `openai/gpt-4.1`).
@@ -161,19 +166,21 @@ Use the "AI Format" button above the notes textarea to:
 
 Implementation details:
 - Uses `@azure-rest/ai-inference` SDK pointed at `https://models.github.ai/inference`.
-- Reuses your provided GitHub PAT for authentication (no extra keys required).
-- Guards against empty input and very large notes (> ~8k chars pre-format).
-- Low temperature (0.2) for consistent, deterministic formatting.
-- Supports streaming preview: content appears progressively; you can stop mid-way and accept partial output.
+- Streaming responses progressively populate preview (auto-scroll if at bottom).
+- Low temperature (0.2) for structural determinism.
+- Dynamic model list fetched from public catalog; if it fails a curated fallback list is used.
+- Custom system prompt stored locally and resettable with one click.
+- PAT forwarded only per request (never persisted server-side).
 
 Your token is never stored server-side; it's only forwarded in-memory for the model call during the active request.
 
 ## Required GitHub Token Scopes
 
-Minimal:
-- `repo`
-- `read:user`
-- `project` (or fine‑grained: project + issues access)
+Minimal (current features):
+- `issue` create/search issues, labels
+- `organization_projects` fine‑grained: access to Issues + Projects
+- `organization_models:read`
+
 
 ## Security Features
 
@@ -209,10 +216,11 @@ Minimal:
 - Options must include: In Progress, No Status, Done
 
 ### AI Formatting Not Working
-- Must be authenticated
-- Notes not empty & < ~8k chars
-- Retry after trimming / simplifying
+- Authenticate first (valid PAT)
+- Ensure notes not empty & < ~8k chars
+- Try another model if list available
 - Check network console for `/api/github/format-notes`
+- Fallback model list should appear if catalog fails (see tooltip on selector if error)
 
 ## Contributing
 

@@ -2,7 +2,9 @@ import { useCallback, useRef, useState } from 'react';
 
 interface UseAIFormatterOptions {
   token: string | null;
-    orgOwner?: string; // GitHub org/owner for multi-org endpoints
+  orgOwner?: string; // GitHub org/owner for multi-org endpoints
+  modelId?: string;
+  systemPrompt?: string;
 }
 
 export interface AIFormatterState {
@@ -14,7 +16,7 @@ export interface AIFormatterState {
   reset: () => void;
 }
 
-export function useAIFormatter({ token, orgOwner }: UseAIFormatterOptions): AIFormatterState {
+export function useAIFormatter({ token, orgOwner, modelId, systemPrompt }: UseAIFormatterOptions): AIFormatterState {
   const [formatted, setFormatted] = useState('');
   const [isFormatting, setIsFormatting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,13 +49,17 @@ export function useAIFormatter({ token, orgOwner }: UseAIFormatterOptions): AIFo
     setError(null);
     setIsFormatting(true);
     try {
-      const resp = await fetch(`/api/github/format-notes?stream=1&orgOwner=${orgOwner}`, {
+      const params = new URLSearchParams();
+      params.set('stream', '1');
+      if (orgOwner) params.set('orgOwner', orgOwner);
+      if (modelId) params.set('modelId', modelId);
+      const resp = await fetch(`/api/github/format-notes?${params.toString()}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, modelId, systemPrompt }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -138,7 +144,7 @@ export function useAIFormatter({ token, orgOwner }: UseAIFormatterOptions): AIFo
     } finally {
       setIsFormatting(false);
     }
-  }, [token, orgOwner]);
+  }, [token, orgOwner, modelId, systemPrompt]);
 
   return { formatted, isFormatting, error, start, abort, reset };
 }

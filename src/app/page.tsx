@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun, Wand2, X, Eye, EyeOff } from 'lucide-react';
+import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun, Wand2, X, Eye, EyeOff, SlidersHorizontal } from 'lucide-react';
 import { Markdown } from '../components/Markdown';
 import { useAIFormatter } from './useAIFormatter';
+import { MODEL_SYSTEM_PROMPT, AVAILABLE_MODELS as CURATED_MODELS } from '@/lib/modelClient';
 
 interface Issue {
   number: number;
@@ -57,7 +58,17 @@ export default function Home() {
   const [notePreview, setNotePreview] = useState(false); // markdown preview toggle
   // AI preview default: show raw markdown source first (requested change)
   const [showRaw, setShowRaw] = useState(true);
-  const { formatted: formattedMarkdown, isFormatting, error: aiError, start: startFormatting, abort: abortFormatting } = useAIFormatter({ token: pat, orgOwner: repoOwner });
+  // AI Settings (model + system prompt)
+  const [aiModel, setAiModel] = useState<string>(() => (typeof window !== 'undefined' && localStorage.getItem('ai-model')) || 'openai/gpt-4.1');
+  const [availableModels, setAvailableModels] = useState<{ id: string; label: string }[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [aiSystemPrompt, setAiSystemPrompt] = useState<string>(() => {
+    if (typeof window === 'undefined') return MODEL_SYSTEM_PROMPT;
+    return localStorage.getItem('ai-system-prompt') || MODEL_SYSTEM_PROMPT;
+  });
+  const [showAISettings, setShowAISettings] = useState(false);
+  const { formatted: formattedMarkdown, isFormatting, error: aiError, start: startFormatting, abort: abortFormatting } = useAIFormatter({ token: pat, orgOwner: repoOwner, modelId: aiModel, systemPrompt: aiSystemPrompt || undefined });
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
     return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
@@ -68,6 +79,8 @@ export default function Home() {
   const aiPreviewRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const labelDropdownRef = useRef<HTMLDivElement>(null);
+  const repoSettingsRef = useRef<HTMLDivElement>(null);
+  const aiSettingsRef = useRef<HTMLDivElement>(null);
 
   // Filtered labels based on search query
   const filteredLabels = availableLabels.filter(label => 
@@ -75,91 +88,151 @@ export default function Home() {
     !selectedLabels.includes(label.name)
   );
 
-  const validatePat = useCallback(async (token: string) => {
-    if (!token.trim()) {
-      setUser(null);
-      return;
-    }
-
-    setIsValidating(true);
-    try {
-      const response = await fetch('/api/github/user', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-        localStorage.setItem('github-pat', token);
-      } else {
-        setUser(null);
-        localStorage.removeItem('github-pat');
-        showNotification('Invalid GitHub Personal Access Token', 'error');
-      }
-    } catch (error) {
-      console.error('Token validation failed:', error);
-      setUser(null);
-      localStorage.removeItem('github-pat');
-      showNotification('Failed to validate token', 'error');
-    } finally {
-      setIsValidating(false);
-    }
+  const showNotification = useCallback((message: string, type: 'success' | 'error', link?: string) => {
+    setNotification({ message, type, link });
+    setTimeout(() => setNotification(null), 4000);
   }, []);
 
   const fetchLabels = useCallback(async () => {
+    if (!user || !pat) return;
     try {
-      const response = await fetch(`/api/github/labels?owner=${encodeURIComponent(repoOwner)}&repo=${encodeURIComponent(repoName)}`, {
-        headers: {
-          'Authorization': `Bearer ${pat}`,
-        },
+      const res = await fetch(`/api/github/labels?owner=${encodeURIComponent(repoOwner)}&repo=${encodeURIComponent(repoName)}`, {
+        headers: { Authorization: `Bearer ${pat}` }
       });
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableLabels(data.labels);
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableLabels(data.labels || []);
       }
-    } catch (error) {
-      console.error('Failed to fetch labels:', error);
+    } catch (e) {
+      console.error('Failed to load labels', e);
     }
-  }, [pat, repoOwner, repoName]);
+  }, [user, pat, repoOwner, repoName]);
 
-  const showNotification = (message: string, type: 'success' | 'error', link?: string) => {
-    setNotification({ message, type, link });
-    setTimeout(() => setNotification(null), 5000); // Increased timeout for link clicks
-  };
+  // Validate PAT and load user
+  const validatePat = useCallback(async (token: string) => {
+    if (!token) return;
+    setIsValidating(true);
+    try {
+      const res = await fetch('/api/github/user', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        showNotification('Authenticated with GitHub', 'success');
+        localStorage.setItem('github-pat', token);
+      } else {
+        setUser(null);
+        showNotification('Invalid token', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to validate token', 'error');
+      setUser(null);
+    } finally {
+      setIsValidating(false);
+    }
+  }, [showNotification]);
 
-  // Load PAT from localStorage on mount
+  // Save logic (create issue or add comment)
+  const handleSave = useCallback(async () => {
+    if (!note.trim() || !user || !pat) return;
+    setIsSaving(true);
+    try {
+      if (showNewIssue) {
+        const response = await fetch('/api/github/create-issue', {
+          method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${pat}`,
+          },
+          body: JSON.stringify({
+            title: newIssueTitle,
+            body: note,
+            labels: selectedLabels,
+            repoOwner,
+            repoName,
+            projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          showNotification(`New issue #${data.number} created successfully!`, 'success', data.url);
+        } else {
+          throw new Error('Failed to create issue');
+        }
+      } else if (selectedIssue) {
+        const response = await fetch('/api/github/add-comment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${pat}`,
+          },
+          body: JSON.stringify({
+            issueNumber: selectedIssue.number,
+            body: note,
+            repoOwner,
+            repoName,
+            projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          showNotification(`Comment added to issue #${selectedIssue.number} successfully!`, 'success', data.url);
+        } else {
+          throw new Error('Failed to add comment');
+        }
+      } else {
+        showNotification('Please select an issue or create a new one', 'error');
+        return;
+      }
+      setNote('');
+      setSelectedIssue(null);
+      setShowNewIssue(false);
+      setNewIssueTitle('');
+      setSelectedLabels([]);
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to save note', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [note, user, pat, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, repoOwner, repoName, projectNodeId, projectStatus, showNotification]);
+
+  // Mount: load persisted settings (PAT, repo, project, AI) & theme
   useEffect(() => {
-  setMounted(true);
-    // Apply saved theme early
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+    setMounted(true);
+    try {
+      const savedPat = localStorage.getItem('github-pat');
+      const savedRepoOwner = localStorage.getItem('repo-owner');
+      const savedRepoName = localStorage.getItem('repo-name');
+      const savedProjectUrl = localStorage.getItem('project-url');
+      const savedProjectName = localStorage.getItem('project-name');
+      const savedProjectNumber = localStorage.getItem('project-number');
+      const savedProjectNodeId = localStorage.getItem('project-node-id');
+      const savedProjectStatus = localStorage.getItem('project-status');
+      const savedModel = localStorage.getItem('ai-model');
+      const savedPrompt = localStorage.getItem('ai-system-prompt');
+
+      if (savedPat) {
+        setPat(savedPat);
+        validatePat(savedPat);
+      }
+      if (savedRepoOwner) setRepoOwner(savedRepoOwner);
+      if (savedRepoName) setRepoName(savedRepoName);
+      if (savedProjectUrl) setProjectUrl(savedProjectUrl);
+      if (savedProjectName) setProjectName(savedProjectName);
+      if (savedProjectNumber) setProjectNumber(parseInt(savedProjectNumber, 10));
+      if (savedProjectNodeId) setProjectNodeId(savedProjectNodeId);
+      if (savedProjectStatus === 'in-progress' || savedProjectStatus === 'no-status' || savedProjectStatus === 'done') {
+        setProjectStatus(savedProjectStatus);
+      }
+      if (savedModel) setAiModel(savedModel);
+      if (savedPrompt) setAiSystemPrompt(savedPrompt); else setAiSystemPrompt(MODEL_SYSTEM_PROMPT);
+    } catch (e) {
+      console.warn('Failed loading saved settings', e);
     }
-    const savedPat = localStorage.getItem('github-pat');
-    const savedRepoOwner = localStorage.getItem('repo-owner');
-    const savedRepoName = localStorage.getItem('repo-name');
-    const savedProjectUrl = localStorage.getItem('project-url');
-    const savedProjectName = localStorage.getItem('project-name');
-  const savedProjectNumber = localStorage.getItem('project-number');
-  const savedProjectNodeId = localStorage.getItem('project-node-id');
-  const savedProjectStatus = localStorage.getItem('project-status');
-    
-    if (savedPat) {
-      setPat(savedPat);
-      validatePat(savedPat);
-    }
-    if (savedRepoOwner) setRepoOwner(savedRepoOwner);
-    if (savedRepoName) setRepoName(savedRepoName);
-    if (savedProjectUrl) setProjectUrl(savedProjectUrl);
-    if (savedProjectName) setProjectName(savedProjectName);
-  if (savedProjectNumber) setProjectNumber(parseInt(savedProjectNumber, 10));
-    if (savedProjectNodeId) setProjectNodeId(savedProjectNodeId);
-    if (savedProjectStatus === 'in-progress' || savedProjectStatus === 'no-status' || savedProjectStatus === 'done') {
-      setProjectStatus(savedProjectStatus);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- theme read on mount only
-  }, [validatePat]); // Include validatePat dependency
+  }, [validatePat]);
 
   // Persist/apply theme when changed
   useEffect(() => {
@@ -223,6 +296,8 @@ export default function Home() {
   localStorage.removeItem('project-number');
   localStorage.removeItem('project-node-id');
   localStorage.removeItem('project-status');
+  localStorage.removeItem('ai-model');
+  localStorage.removeItem('ai-system-prompt');
   // Legacy keys cleanup (older implementation used these)
   localStorage.removeItem('project');
   localStorage.removeItem('project-id');
@@ -241,19 +316,70 @@ export default function Home() {
   setProjectStatus('in-progress');
   };
 
-  const updateRepoSettings = () => {
-    localStorage.setItem('repo-owner', repoOwner);
-    localStorage.setItem('repo-name', repoName);
+  // Live persistence of repository & project settings
+  useEffect(() => { localStorage.setItem('repo-owner', repoOwner); }, [repoOwner]);
+  useEffect(() => { localStorage.setItem('repo-name', repoName); }, [repoName]);
+  useEffect(() => {
     if (projectUrl) localStorage.setItem('project-url', projectUrl); else localStorage.removeItem('project-url');
+  }, [projectUrl]);
+  useEffect(() => {
     if (projectName) localStorage.setItem('project-name', projectName); else localStorage.removeItem('project-name');
-  if (projectNumber != null) localStorage.setItem('project-number', String(projectNumber)); else localStorage.removeItem('project-number');
-  if (projectNodeId) localStorage.setItem('project-node-id', projectNodeId); else localStorage.removeItem('project-node-id');
-  if (projectStatus) localStorage.setItem('project-status', projectStatus); else localStorage.removeItem('project-status');
-    setShowSettings(false);
-    if (user && pat) {
-      fetchLabels(); // Refresh labels for new repo
-    }
-  };
+  }, [projectName]);
+  useEffect(() => {
+    if (projectNumber != null) localStorage.setItem('project-number', String(projectNumber)); else localStorage.removeItem('project-number');
+  }, [projectNumber]);
+  useEffect(() => {
+    if (projectNodeId) localStorage.setItem('project-node-id', projectNodeId); else localStorage.removeItem('project-node-id');
+  }, [projectNodeId]);
+  useEffect(() => {
+    if (projectStatus) localStorage.setItem('project-status', projectStatus); else localStorage.removeItem('project-status');
+  }, [projectStatus]);
+  // Refresh labels when repo owner/name change and authenticated
+  useEffect(() => { if (user && pat) fetchLabels(); }, [repoOwner, repoName, user, pat, fetchLabels]);
+
+  // Fetch models dynamically from proxy endpoint (GitHub Models API) after auth or owner change.
+  useEffect(() => {
+    if (!user || !pat) return;
+    let cancelled = false;
+    (async () => {
+      setModelsLoading(true);
+      setModelsError(null);
+      try {
+        const res = await fetch(`/api/github/models?owner=${encodeURIComponent(repoOwner)}`, { headers: { Authorization: `Bearer ${pat}` } });
+        if (!res.ok) throw new Error('Failed to load models');
+        const data = await res.json();
+        if (cancelled) return;
+        type ModelEntry = { id: string; label: string };
+        const rawModels: unknown = data.models;
+        const models: ModelEntry[] = Array.isArray(rawModels)
+          ? (rawModels as unknown[]).filter((m: unknown): m is ModelEntry =>
+              typeof m === 'object' && m !== null &&
+              typeof (m as { id?: unknown }).id === 'string' &&
+              typeof (m as { label?: unknown }).label === 'string'
+            )
+          : [];
+        if (models.length === 0) throw new Error('No models returned');
+        setAvailableModels(models);
+        if (!models.some((m) => m.id === aiModel)) {
+          setAiModel(models[0].id);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          console.error(e);
+          const message = e instanceof Error ? e.message : 'Failed loading models';
+          setModelsError(message);
+          // Fallback to curated static list
+          setAvailableModels(CURATED_MODELS);
+          if (!CURATED_MODELS.some(m => m.id === aiModel)) {
+            setAiModel(CURATED_MODELS[0].id);
+          }
+        }
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, pat, repoOwner, aiModel]);
 
   // Debounced search
   useEffect(() => {
@@ -295,82 +421,7 @@ export default function Home() {
     };
   }, [searchQuery, user, pat, repoOwner, repoName]); // Include repo dependencies
 
-  // Keyboard shortcuts
-  const handleSave = useCallback(async () => {
-    if (!note.trim() || !user || !pat) return;
-    
-    setIsSaving(true);
-    try {
-      if (showNewIssue) {
-        // Create new issue
-    const response = await fetch('/api/github/create-issue', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${pat}`,
-          },
-          body: JSON.stringify({
-            title: newIssueTitle,
-            body: note,
-            labels: selectedLabels,
-            repoOwner,
-            repoName,
-      projectNodeId: projectNodeId || undefined,
-            projectStatus: projectNodeId ? projectStatus : undefined,
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          showNotification(`New issue #${data.number} created successfully!`, 'success', data.url);
-        } else {
-          throw new Error('Failed to create issue');
-        }
-      } else if (selectedIssue) {
-        // Add comment to existing issue
-    const response = await fetch('/api/github/add-comment', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${pat}`,
-          },
-          body: JSON.stringify({
-            issueNumber: selectedIssue.number,
-            body: note,
-            repoOwner,
-            repoName,
-      projectNodeId: projectNodeId || undefined,
-            projectStatus: projectNodeId ? projectStatus : undefined,
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          showNotification(`Comment added to issue #${selectedIssue.number} successfully!`, 'success', data.url);
-        } else {
-          throw new Error('Failed to add comment');
-        }
-      } else {
-        showNotification('Please select an issue or create a new one', 'error');
-        return;
-      }
-      
-      // Reset form
-      setNote('');
-      setSelectedIssue(null);
-      setShowNewIssue(false);
-      setNewIssueTitle('');
-      setSelectedLabels([]);
-      setLabelSearchQuery('');
-      setShowLabelDropdown(false);
-      setSearchQuery('');
-    } catch (error) {
-      console.error('Save failed:', error);
-      showNotification('Failed to save note. Please try again.', 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [note, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, user, pat, repoOwner, repoName, projectNodeId, projectStatus]); // Include repo dependencies
+  // Keyboard shortcuts (listener added below) - handleSave defined earlier
 
   const handleAIFormat = useCallback(() => {
     if (!note.trim()) return showNotification('Nothing to format – notes are empty', 'error');
@@ -379,7 +430,15 @@ export default function Home() {
     setShowRaw(true);
     setShowAIModal(true);
     startFormatting(note);
-  }, [note, pat, startFormatting]);
+  }, [note, pat, startFormatting, showNotification]);
+
+  // Persist AI settings when changed
+  useEffect(() => {
+    if (aiModel) localStorage.setItem('ai-model', aiModel);
+  }, [aiModel]);
+  useEffect(() => {
+  if (aiSystemPrompt && aiSystemPrompt !== MODEL_SYSTEM_PROMPT) localStorage.setItem('ai-system-prompt', aiSystemPrompt); else localStorage.removeItem('ai-system-prompt');
+  }, [aiSystemPrompt]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -393,17 +452,29 @@ export default function Home() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  // Close label dropdown when clicking outside
+  // Close dropdowns/panels when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (labelDropdownRef.current && !labelDropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (labelDropdownRef.current && !labelDropdownRef.current.contains(target)) {
         setShowLabelDropdown(false);
       }
+      if (showSettings && repoSettingsRef.current && !repoSettingsRef.current.contains(target)) {
+        const toggleBtn = (target as HTMLElement).closest('button');
+        if (!toggleBtn || !toggleBtn.querySelector('svg')) {
+          setShowSettings(false);
+        }
+      }
+      if (showAISettings && aiSettingsRef.current && !aiSettingsRef.current.contains(target)) {
+        const toggleBtn = (target as HTMLElement).closest('button');
+        if (!toggleBtn || !toggleBtn.querySelector('svg')) {
+          setShowAISettings(false);
+        }
+      }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [showSettings, showAISettings]);
 
   const parseProjectUrl = (url: string) => {
     // Expected formats: https://github.com/orgs/<org>/projects/<number>[/...] or https://github.com/orgs/<org>/projects/<number>/views/<id>
@@ -583,20 +654,15 @@ export default function Home() {
                       type="button"
                       onClick={fetchProjectFromUrl}
                       className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                      title="Link project from URL"
+                      aria-label="Link project from URL"
                     >Link</button>
                   </div>
                   {projectName && (
                     <p className="mt-1 text-xs text-gray-600">Linked: <span className="font-medium">{projectName}</span>{projectNumber !== null && ` (#${projectNumber})`}</p>
                   )}
                 </div>
-                <div className="sm:col-span-2">
-                  <button
-                    onClick={updateRepoSettings}
-                    className="w-full bg-blue-600 text-white px-3 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
-                  >
-                    Save Settings
-                  </button>
-                </div>
+                {/* Removed explicit save button – settings persist live */}
               </div>
             )}
           </div>
@@ -615,39 +681,55 @@ export default function Home() {
             <h1 className="text-xl font-semibold text-gray-900">Quick Notes</h1>
             <span className="text-sm text-gray-500">→ {repoOwner}/{repoName}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-gray-500" />
               <span className="text-sm text-gray-700">{user.name || user.login}</span>
             </div>
+            <div className="flex items-center gap-1.5">
             <button
               onClick={toggleTheme}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title={mounted && theme === 'light' ? 'Switch to dark mode' : mounted && theme === 'dark' ? 'Switch to light mode' : 'Toggle color mode'}
+              className="text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
               aria-label={mounted && theme === 'light' ? 'Enable dark mode' : mounted && theme === 'dark' ? 'Enable light mode' : 'Toggle color mode'}
+              data-tip={mounted && theme === 'light' ? 'Dark mode' : mounted && theme === 'dark' ? 'Light mode' : 'Toggle theme'}
             >
               {mounted ? (theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />) : <Moon className="h-5 w-5 opacity-0" aria-hidden="true" />}
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title="Repository Settings"
+              className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle Repository Settings"
+              data-tip="Repository Settings"
+              aria-pressed={showSettings}
             >
               <Settings className="h-5 w-5" />
             </button>
             <button
+              onClick={() => setShowAISettings(s => !s)}
+              className={`${showAISettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle AI Settings"
+              data-tip="AI Settings"
+              aria-expanded={showAISettings}
+              aria-controls="ai-settings-panel"
+              aria-pressed={showAISettings}
+            >
+              <SlidersHorizontal className="h-5 w-5" />
+            </button>
+            <button
               onClick={handleLogout}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title="Sign out"
+              className="text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
+              aria-label="Log out"
+              data-tip="Sign out"
             >
               <LogOut className="h-5 w-5" />
             </button>
+            </div>
           </div>
         </div>
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="border-t bg-gray-50 px-4 py-3">
+  {/* Repository Settings Panel */}
+  {showSettings && (
+          <div className="border-t bg-gray-50 px-4 py-3" ref={repoSettingsRef}>
             <div className="max-w-4xl mx-auto">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
                 <div className="flex flex-col">
@@ -684,6 +766,8 @@ export default function Home() {
                       type="button"
                       onClick={fetchProjectFromUrl}
                       className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                      title="Link project from URL"
+                      aria-label="Link project from URL"
                     >Link</button>
                   </div>
                   {projectName && (
@@ -700,14 +784,46 @@ export default function Home() {
                     placeholder="123"
                   />
                 </div>
-                <div className="md:col-span-5 flex justify-end">
-                  <button
-                    onClick={updateRepoSettings}
-                    className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                {/* Removed explicit update button – changes persist live */}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* AI Settings Panel (separate) */}
+        {showAISettings && (
+          <div className="border-t bg-gray-50 px-4 py-3" id="ai-settings-panel" ref={aiSettingsRef}>
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="md:col-span-2 flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Model</label>
+                  <select
+                    value={aiModel}
+                    onChange={(e) => setAiModel(e.target.value)}
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white disabled:opacity-50"
+                    disabled={modelsLoading || !!modelsError}
+                    aria-busy={modelsLoading}
+                    aria-describedby={modelsError ? 'models-error' : undefined}
                   >
-                    Update
-                  </button>
+                    {modelsLoading && <option>Loading models…</option>}
+                    {modelsError && <option>Error loading models</option>}
+                    {!modelsLoading && !modelsError && availableModels.map(m => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  {modelsError && (
+                    <div id="models-error" className="mt-1 text-[11px] text-red-600">{modelsError}</div>
+                  )}
                 </div>
+                <div className="md:col-span-3 flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1 flex items-center justify-between">System Prompt <button type="button" onClick={() => setAiSystemPrompt(MODEL_SYSTEM_PROMPT)} className="text-[10px] underline text-blue-600 hover:text-blue-800" title="Reset to default system prompt" aria-label="Reset system prompt to default">Reset</button></label>
+                  <textarea
+                    value={aiSystemPrompt}
+                    onChange={(e) => setAiSystemPrompt(e.target.value)}
+                    placeholder="Custom system prompt (leave blank for default)."
+                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 min-h-[100px] resize-y"
+                  />
+                </div>
+                <div className="md:col-span-5 text-[11px] text-gray-500">Changes persist locally; cleared on logout.</div>
               </div>
             </div>
           </div>
@@ -730,8 +846,9 @@ export default function Home() {
                     type="button"
                     onClick={() => setNotePreview(p => !p)}
                     aria-pressed={notePreview}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
                     aria-label={notePreview ? 'Switch to edit mode' : 'Switch to markdown preview'}
+                    data-tip={notePreview ? 'Show editable raw notes' : 'Preview rendered markdown'}
                   >
                     {notePreview ? 'Edit' : 'Preview'}
                   </button>
@@ -739,8 +856,9 @@ export default function Home() {
                     type="button"
                     onClick={handleAIFormat}
                     disabled={isFormatting || !note.trim()}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-indigo-50 hover:border-indigo-300 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
                     aria-label="Format notes with AI"
+                    data-tip={isFormatting ? 'Formatting in progress' : (!note.trim() ? 'Enter some notes first' : 'Format notes with AI')}
                   >
                     <Wand2 className="h-3.5 w-3.5" />
                     {isFormatting ? 'Formatting…' : 'AI Format'}
@@ -791,7 +909,8 @@ export default function Home() {
                         <button
                           onClick={() => setSelectedLabels(selectedLabels.filter(l => l !== labelName))}
                           className="ml-1 hover:bg-black hover:bg-opacity-10 rounded-full p-0.5"
-                          title="Remove label"
+                          title={`Remove label ${labelName}`}
+                          aria-label={`Remove label ${labelName}`}
                         >
                           ×
                         </button>
@@ -835,6 +954,8 @@ export default function Home() {
                             role="option"
                             aria-selected={false}
                             className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
+                            title={`Add label ${label.name}`}
+                            aria-label={`Add label ${label.name}`}
                           >
                             <div
                               className="w-3 h-3 rounded-full flex-shrink-0"
@@ -908,6 +1029,8 @@ export default function Home() {
                           setShowNewIssue(false);
                         }}
                         className="w-full text-left p-3 border-b border-gray-100 last:border-b-0 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 hover:bg-gray-100 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_70%,black)] dark:bg-[var(--surface)]"
+                        title={`Select issue #${issue.number}`}
+                        aria-label={`Select issue #${issue.number}: ${issue.title}`}
                       >
                         <div className="font-medium text-sm">#{issue.number}</div>
                         <div className="text-sm text-gray-600">{issue.title}</div>
@@ -1055,6 +1178,8 @@ export default function Home() {
                 <button
                   onClick={() => abortFormatting()}
                   className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  title="Stop formatting"
+                  aria-label="Stop formatting"
                 >
                   Stop
                 </button>
@@ -1063,9 +1188,11 @@ export default function Home() {
                   <button
                     onClick={() => setShowRaw(r => !r)}
                     className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 inline-flex items-center gap-2"
+                    title={showRaw ? 'Show formatted preview' : 'Show raw markdown source'}
+                    aria-label={showRaw ? 'Show formatted preview' : 'Show raw markdown source'}
                   >
-                    {showRaw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    {showRaw ? 'Hide Raw' : 'Show Raw'}
+                    {showRaw ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    {showRaw ? 'Show Preview' : 'Show Raw'}
                   </button>
                 )
               )}
@@ -1086,6 +1213,8 @@ export default function Home() {
                 }}
                 disabled={!formattedMarkdown.trim() || isFormatting}
                 className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                title="Replace current notes with AI formatted content"
+                aria-label="Accept AI formatted content and replace current notes"
               >
                 {isFormatting && !formattedMarkdown ? 'Waiting…' : 'Accept & Replace'}
               </button>

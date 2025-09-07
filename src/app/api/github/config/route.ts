@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from '@/lib/modelClient';
 
 export async function GET() {
   return NextResponse.json({
     owner: process.env.GITHUB_REPO_OWNER || 'github',
     name: process.env.GITHUB_REPO_NAME || 'solutions-engineering',
+    models: AVAILABLE_MODELS,
+    defaultModel: DEFAULT_MODEL_ID,
   });
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isUnexpected, ChatCompletionsOutput } from '@azure-rest/ai-inference';
-import { createModelClient, buildMessages } from '@/lib/modelClient';
+import { createModelClient, buildMessages, DEFAULT_MODEL_ID } from '@/lib/modelClient';
 
 // Model id centralized in createModelClient
 
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     }
     const token = authHeader.substring(7);
 
-    const { content } = await request.json();
+  const { content, modelId: bodyModelId, systemPrompt } = await request.json();
     if (!content || typeof content !== 'string' || !content.trim()) {
       return NextResponse.json({ error: 'content is required' }, { status: 400 });
     }
@@ -42,8 +42,9 @@ export async function POST(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const wantsStream = searchParams.get('stream') === '1';
   const owner = searchParams.get('orgOwner') || process.env.GITHUB_REPO_OWNER || 'github';
-  
-  const { client, model, endpoint } = createModelClient({ token, orgOwner: owner });
+  const queryModel = searchParams.get('modelId');
+  const modelId = (bodyModelId || queryModel || DEFAULT_MODEL_ID).trim();
+  const { client, model, endpoint } = createModelClient({ token, orgOwner: owner, modelId });
 
     if (!wantsStream) {
       const response = await client.path('/chat/completions').post({
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
           model,
           temperature: 0.2,
           top_p: 1,
-          messages: buildMessages(content),
+          messages: buildMessages(content, systemPrompt),
         },
       });
       if (isUnexpected(response)) {
@@ -79,11 +80,11 @@ export async function POST(request: NextRequest) {
                 'Authorization': `Bearer ${token}`,
               },
               body: JSON.stringify({
-                model,
+    model,
                 temperature: 0.2,
                 top_p: 1,
                 stream: true,
-        messages: buildMessages(content),
+  messages: buildMessages(content, systemPrompt),
               }),
             });
 
