@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun } from 'lucide-react';
+import { Search, Save, Plus, User, LogOut, Github, Key, Settings, Moon, Sun, Wand2, X, Eye, EyeOff, SlidersHorizontal } from 'lucide-react';
+import { Markdown } from '../components/Markdown';
+import { useAIFormatter } from './useAIFormatter';
+import { MODEL_SYSTEM_PROMPT, AVAILABLE_MODELS as CURATED_MODELS } from '@/lib/modelClient';
 
 interface Issue {
   number: number;
@@ -31,6 +34,12 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [repoOwner, setRepoOwner] = useState('github');
   const [repoName, setRepoName] = useState('solutions-engineering');
+  // Project (ProjectV2) association via URL
+  const [projectUrl, setProjectUrl] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectNumber, setProjectNumber] = useState<number | null>(null);
+  const [projectNodeId, setProjectNodeId] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<'in-progress' | 'no-status' | 'done'>('in-progress');
 
   const [note, setNote] = useState('');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -45,6 +54,21 @@ export default function Home() {
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error'; link?: string } | null>(null);
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [notePreview, setNotePreview] = useState(false); // markdown preview toggle
+  // AI preview default: show raw markdown source first (requested change)
+  const [showRaw, setShowRaw] = useState(true);
+  // AI Settings (model + system prompt)
+  const [aiModel, setAiModel] = useState<string>(() => (typeof window !== 'undefined' && localStorage.getItem('ai-model')) || 'openai/gpt-4.1');
+  const [availableModels, setAvailableModels] = useState<{ id: string; label: string }[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [aiSystemPrompt, setAiSystemPrompt] = useState<string>(() => {
+    if (typeof window === 'undefined') return MODEL_SYSTEM_PROMPT;
+    return localStorage.getItem('ai-system-prompt') || MODEL_SYSTEM_PROMPT;
+  });
+  const [showAISettings, setShowAISettings] = useState(false);
+  const { formatted: formattedMarkdown, isFormatting, error: aiError, start: startFormatting, abort: abortFormatting } = useAIFormatter({ token: pat, orgOwner: repoOwner, modelId: aiModel, systemPrompt: aiSystemPrompt || undefined });
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
     return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
@@ -52,8 +76,11 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const aiPreviewRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const labelDropdownRef = useRef<HTMLDivElement>(null);
+  const repoSettingsRef = useRef<HTMLDivElement>(null);
+  const aiSettingsRef = useRef<HTMLDivElement>(null);
 
   // Filtered labels based on search query
   const filteredLabels = availableLabels.filter(label => 
@@ -61,78 +88,151 @@ export default function Home() {
     !selectedLabels.includes(label.name)
   );
 
-  const validatePat = useCallback(async (token: string) => {
-    if (!token.trim()) {
-      setUser(null);
-      return;
-    }
-
-    setIsValidating(true);
-    try {
-      const response = await fetch('/api/github/user', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-        localStorage.setItem('github-pat', token);
-      } else {
-        setUser(null);
-        localStorage.removeItem('github-pat');
-        showNotification('Invalid GitHub Personal Access Token', 'error');
-      }
-    } catch (error) {
-      console.error('Token validation failed:', error);
-      setUser(null);
-      localStorage.removeItem('github-pat');
-      showNotification('Failed to validate token', 'error');
-    } finally {
-      setIsValidating(false);
-    }
+  const showNotification = useCallback((message: string, type: 'success' | 'error', link?: string) => {
+    setNotification({ message, type, link });
+    setTimeout(() => setNotification(null), 4000);
   }, []);
 
   const fetchLabels = useCallback(async () => {
+    if (!user || !pat) return;
     try {
-      const response = await fetch(`/api/github/labels?owner=${encodeURIComponent(repoOwner)}&repo=${encodeURIComponent(repoName)}`, {
-        headers: {
-          'Authorization': `Bearer ${pat}`,
-        },
+      const res = await fetch(`/api/github/labels?owner=${encodeURIComponent(repoOwner)}&repo=${encodeURIComponent(repoName)}`, {
+        headers: { Authorization: `Bearer ${pat}` }
       });
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableLabels(data.labels);
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableLabels(data.labels || []);
       }
-    } catch (error) {
-      console.error('Failed to fetch labels:', error);
+    } catch (e) {
+      console.error('Failed to load labels', e);
     }
-  }, [pat, repoOwner, repoName]);
+  }, [user, pat, repoOwner, repoName]);
 
-  const showNotification = (message: string, type: 'success' | 'error', link?: string) => {
-    setNotification({ message, type, link });
-    setTimeout(() => setNotification(null), 5000); // Increased timeout for link clicks
-  };
+  // Validate PAT and load user
+  const validatePat = useCallback(async (token: string) => {
+    if (!token) return;
+    setIsValidating(true);
+    try {
+      const res = await fetch('/api/github/user', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        showNotification('Authenticated with GitHub', 'success');
+        localStorage.setItem('github-pat', token);
+      } else {
+        setUser(null);
+        showNotification('Invalid token', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to validate token', 'error');
+      setUser(null);
+    } finally {
+      setIsValidating(false);
+    }
+  }, [showNotification]);
 
-  // Load PAT from localStorage on mount
+  // Save logic (create issue or add comment)
+  const handleSave = useCallback(async () => {
+    if (!note.trim() || !user || !pat) return;
+    setIsSaving(true);
+    try {
+      if (showNewIssue) {
+        const response = await fetch('/api/github/create-issue', {
+          method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${pat}`,
+          },
+          body: JSON.stringify({
+            title: newIssueTitle,
+            body: note,
+            labels: selectedLabels,
+            repoOwner,
+            repoName,
+            projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          showNotification(`New issue #${data.number} created successfully!`, 'success', data.url);
+        } else {
+          throw new Error('Failed to create issue');
+        }
+      } else if (selectedIssue) {
+        const response = await fetch('/api/github/add-comment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${pat}`,
+          },
+          body: JSON.stringify({
+            issueNumber: selectedIssue.number,
+            body: note,
+            repoOwner,
+            repoName,
+            projectNodeId: projectNodeId || undefined,
+            projectStatus: projectNodeId ? projectStatus : undefined,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          showNotification(`Comment added to issue #${selectedIssue.number} successfully!`, 'success', data.url);
+        } else {
+          throw new Error('Failed to add comment');
+        }
+      } else {
+        showNotification('Please select an issue or create a new one', 'error');
+        return;
+      }
+      setNote('');
+      setSelectedIssue(null);
+      setShowNewIssue(false);
+      setNewIssueTitle('');
+      setSelectedLabels([]);
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to save note', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [note, user, pat, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, repoOwner, repoName, projectNodeId, projectStatus, showNotification]);
+
+  // Mount: load persisted settings (PAT, repo, project, AI) & theme
   useEffect(() => {
-  setMounted(true);
-    // Apply saved theme early
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+    setMounted(true);
+    try {
+      const savedPat = localStorage.getItem('github-pat');
+      const savedRepoOwner = localStorage.getItem('repo-owner');
+      const savedRepoName = localStorage.getItem('repo-name');
+      const savedProjectUrl = localStorage.getItem('project-url');
+      const savedProjectName = localStorage.getItem('project-name');
+      const savedProjectNumber = localStorage.getItem('project-number');
+      const savedProjectNodeId = localStorage.getItem('project-node-id');
+      const savedProjectStatus = localStorage.getItem('project-status');
+      const savedModel = localStorage.getItem('ai-model');
+      const savedPrompt = localStorage.getItem('ai-system-prompt');
+
+      if (savedPat) {
+        setPat(savedPat);
+        validatePat(savedPat);
+      }
+      if (savedRepoOwner) setRepoOwner(savedRepoOwner);
+      if (savedRepoName) setRepoName(savedRepoName);
+      if (savedProjectUrl) setProjectUrl(savedProjectUrl);
+      if (savedProjectName) setProjectName(savedProjectName);
+      if (savedProjectNumber) setProjectNumber(parseInt(savedProjectNumber, 10));
+      if (savedProjectNodeId) setProjectNodeId(savedProjectNodeId);
+      if (savedProjectStatus === 'in-progress' || savedProjectStatus === 'no-status' || savedProjectStatus === 'done') {
+        setProjectStatus(savedProjectStatus);
+      }
+      if (savedModel) setAiModel(savedModel);
+      if (savedPrompt) setAiSystemPrompt(savedPrompt); else setAiSystemPrompt(MODEL_SYSTEM_PROMPT);
+    } catch (e) {
+      console.warn('Failed loading saved settings', e);
     }
-    const savedPat = localStorage.getItem('github-pat');
-    const savedRepoOwner = localStorage.getItem('repo-owner');
-    const savedRepoName = localStorage.getItem('repo-name');
-    
-    if (savedPat) {
-      setPat(savedPat);
-      validatePat(savedPat);
-    }
-    if (savedRepoOwner) setRepoOwner(savedRepoOwner);
-    if (savedRepoName) setRepoName(savedRepoName);
-  }, [validatePat]); // Include validatePat dependency
+  }, [validatePat]);
 
   // Persist/apply theme when changed
   useEffect(() => {
@@ -149,10 +249,31 @@ export default function Home() {
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      const el = textareaRef.current;
+      el.style.height = 'auto';
+      const maxPx = 400; // ~20-22 lines depending on content
+      const needed = el.scrollHeight;
+      el.style.height = `${Math.min(needed, maxPx)}px`;
+      // If exceeding max, allow vertical scroll
+      if (needed > maxPx) {
+        el.style.overflowY = 'auto';
+      } else {
+        el.style.overflowY = 'hidden';
+      }
     }
   }, [note]);
+
+  // Auto scroll AI preview while streaming, but only if user is already near bottom
+  useEffect(() => {
+    if (!isFormatting) return; // only during live stream
+    const container = aiPreviewRef.current;
+    if (!container) return;
+    const threshold = 80; // px from bottom considered "at bottom"
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    if (atBottom) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [formattedMarkdown, isFormatting]);
 
   // Load labels when authenticated
   useEffect(() => {
@@ -166,10 +287,24 @@ export default function Home() {
     validatePat(pat);
   };
 
+  const LOCALSTORAGE_KEYS_TO_CLEAR = [
+    'github-pat',
+    'project-url',
+    'project-name',
+    'project-number',
+    'project-node-id',
+    'project-status',
+    'ai-model',
+    'ai-system-prompt',
+    // Legacy keys cleanup (older implementation used these)
+    'project',
+    'project-id',
+  ];
+
   const handleLogout = () => {
     setPat('');
     setUser(null);
-    localStorage.removeItem('github-pat');
+    LOCALSTORAGE_KEYS_TO_CLEAR.forEach(key => localStorage.removeItem(key));
     setNote('');
     setSelectedIssue(null);
     setShowNewIssue(false);
@@ -178,16 +313,77 @@ export default function Home() {
     setLabelSearchQuery('');
     setShowLabelDropdown(false);
     setSearchQuery('');
+    setProjectUrl('');
+    setProjectName('');
+    setProjectNumber(null);
+    setProjectNodeId(null);
+    setProjectStatus('in-progress');
   };
 
-  const updateRepoSettings = () => {
-    localStorage.setItem('repo-owner', repoOwner);
-    localStorage.setItem('repo-name', repoName);
-    setShowSettings(false);
-    if (user && pat) {
-      fetchLabels(); // Refresh labels for new repo
-    }
-  };
+  // Live persistence of repository & project settings
+  useEffect(() => { localStorage.setItem('repo-owner', repoOwner); }, [repoOwner]);
+  useEffect(() => { localStorage.setItem('repo-name', repoName); }, [repoName]);
+  useEffect(() => {
+    if (projectUrl) localStorage.setItem('project-url', projectUrl); else localStorage.removeItem('project-url');
+  }, [projectUrl]);
+  useEffect(() => {
+    if (projectName) localStorage.setItem('project-name', projectName); else localStorage.removeItem('project-name');
+  }, [projectName]);
+  useEffect(() => {
+    if (projectNumber != null) localStorage.setItem('project-number', String(projectNumber)); else localStorage.removeItem('project-number');
+  }, [projectNumber]);
+  useEffect(() => {
+    if (projectNodeId) localStorage.setItem('project-node-id', projectNodeId); else localStorage.removeItem('project-node-id');
+  }, [projectNodeId]);
+  useEffect(() => {
+    if (projectStatus) localStorage.setItem('project-status', projectStatus); else localStorage.removeItem('project-status');
+  }, [projectStatus]);
+  // Refresh labels when repo owner/name change and authenticated
+  useEffect(() => { if (user && pat) fetchLabels(); }, [repoOwner, repoName, user, pat, fetchLabels]);
+
+  // Fetch models dynamically from proxy endpoint (GitHub Models API) after auth or owner change.
+  useEffect(() => {
+    if (!user || !pat) return;
+    let cancelled = false;
+    (async () => {
+      setModelsLoading(true);
+      setModelsError(null);
+      try {
+        const res = await fetch(`/api/github/models?owner=${encodeURIComponent(repoOwner)}`, { headers: { Authorization: `Bearer ${pat}` } });
+        if (!res.ok) throw new Error('Failed to load models');
+        const data = await res.json();
+        if (cancelled) return;
+        type ModelEntry = { id: string; label: string };
+        const rawModels: unknown = data.models;
+        const models: ModelEntry[] = Array.isArray(rawModels)
+          ? (rawModels as unknown[]).filter((m: unknown): m is ModelEntry =>
+              typeof m === 'object' && m !== null &&
+              typeof (m as { id?: unknown }).id === 'string' &&
+              typeof (m as { label?: unknown }).label === 'string'
+            )
+          : [];
+        if (models.length === 0) throw new Error('No models returned');
+        setAvailableModels(models);
+        if (!models.some((m) => m.id === aiModel)) {
+          setAiModel(models[0].id);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          console.error(e);
+          const message = e instanceof Error ? e.message : 'Failed loading models';
+          setModelsError(message);
+          // Fallback to curated static list
+          setAvailableModels(CURATED_MODELS);
+          if (!CURATED_MODELS.some(m => m.id === aiModel)) {
+            setAiModel(CURATED_MODELS[0].id);
+          }
+        }
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, pat, repoOwner, aiModel]);
 
   // Debounced search
   useEffect(() => {
@@ -229,78 +425,24 @@ export default function Home() {
     };
   }, [searchQuery, user, pat, repoOwner, repoName]); // Include repo dependencies
 
-  // Keyboard shortcuts
-  const handleSave = useCallback(async () => {
-    if (!note.trim() || !user || !pat) return;
-    
-    setIsSaving(true);
-    try {
-      if (showNewIssue) {
-        // Create new issue
-        const response = await fetch('/api/github/create-issue', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${pat}`,
-          },
-          body: JSON.stringify({
-            title: newIssueTitle,
-            body: note,
-            labels: selectedLabels,
-            repoOwner,
-            repoName,
-          }),
-        });
+  // Keyboard shortcuts (listener added below) - handleSave defined earlier
 
-        if (response.ok) {
-          const data = await response.json();
-          showNotification(`New issue #${data.number} created successfully!`, 'success', data.url);
-        } else {
-          throw new Error('Failed to create issue');
-        }
-      } else if (selectedIssue) {
-        // Add comment to existing issue
-        const response = await fetch('/api/github/add-comment', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${pat}`,
-          },
-          body: JSON.stringify({
-            issueNumber: selectedIssue.number,
-            body: note,
-            repoOwner,
-            repoName,
-          }),
-        });
+  const handleAIFormat = useCallback(() => {
+    if (!note.trim()) return showNotification('Nothing to format – notes are empty', 'error');
+    if (!pat) return showNotification('Authenticate with GitHub first', 'error');
+    // Ensure each new formatting session starts in raw mode
+    setShowRaw(true);
+    setShowAIModal(true);
+    startFormatting(note);
+  }, [note, pat, startFormatting, showNotification]);
 
-        if (response.ok) {
-          const data = await response.json();
-          showNotification(`Comment added to issue #${selectedIssue.number} successfully!`, 'success', data.url);
-        } else {
-          throw new Error('Failed to add comment');
-        }
-      } else {
-        showNotification('Please select an issue or create a new one', 'error');
-        return;
-      }
-      
-      // Reset form
-      setNote('');
-      setSelectedIssue(null);
-      setShowNewIssue(false);
-      setNewIssueTitle('');
-      setSelectedLabels([]);
-      setLabelSearchQuery('');
-      setShowLabelDropdown(false);
-      setSearchQuery('');
-    } catch (error) {
-      console.error('Save failed:', error);
-      showNotification('Failed to save note. Please try again.', 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [note, showNewIssue, newIssueTitle, selectedLabels, selectedIssue, user, pat, repoOwner, repoName]); // Include repo dependencies
+  // Persist AI settings when changed
+  useEffect(() => {
+    if (aiModel) localStorage.setItem('ai-model', aiModel);
+  }, [aiModel]);
+  useEffect(() => {
+  if (aiSystemPrompt && aiSystemPrompt !== MODEL_SYSTEM_PROMPT) localStorage.setItem('ai-system-prompt', aiSystemPrompt); else localStorage.removeItem('ai-system-prompt');
+  }, [aiSystemPrompt]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -314,18 +456,90 @@ export default function Home() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  // Close label dropdown when clicking outside
+  // Close dropdowns/panels when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (labelDropdownRef.current && !labelDropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (labelDropdownRef.current && !labelDropdownRef.current.contains(target)) {
         setShowLabelDropdown(false);
       }
+      if (showSettings && repoSettingsRef.current && !repoSettingsRef.current.contains(target)) {
+        const toggleBtn = (target as HTMLElement).closest('button');
+        if (!toggleBtn || !toggleBtn.querySelector('svg')) {
+          setShowSettings(false);
+        }
+      }
+      if (showAISettings && aiSettingsRef.current && !aiSettingsRef.current.contains(target)) {
+        const toggleBtn = (target as HTMLElement).closest('button');
+        if (!toggleBtn || !toggleBtn.querySelector('svg')) {
+          setShowAISettings(false);
+        }
+      }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [showSettings, showAISettings]);
 
+  const parseProjectUrl = (url: string) => {
+    // Expected formats: https://github.com/orgs/<org>/projects/<number>[/...] or https://github.com/orgs/<org>/projects/<number>/views/<id>
+    try {
+      const u = new URL(url.trim());
+      if (u.hostname !== 'github.com') return null;
+      const parts = u.pathname.split('/').filter(Boolean);
+      const orgsIdx = parts.indexOf('orgs');
+      if (orgsIdx === -1 || parts.length < orgsIdx + 4) return null;
+      const org = parts[orgsIdx + 1];
+      if (parts[orgsIdx + 2] !== 'projects') return null;
+      const number = parseInt(parts[orgsIdx + 3], 10);
+      if (Number.isNaN(number)) return null;
+      return { org, number };
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchProjectFromUrl = async () => {
+    if (!projectUrl.trim()) {
+      showNotification('Enter a GitHub Project URL', 'error');
+      return;
+    }
+    const parsed = parseProjectUrl(projectUrl);
+    if (!parsed) {
+      showNotification('Invalid project URL format', 'error');
+      return;
+    }
+    if (!pat) {
+      showNotification('Authenticate first', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/github/project?org=${encodeURIComponent(parsed.org)}&number=${parsed.number}`, {
+        headers: { Authorization: `Bearer ${pat}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProjectName(data.project.name);
+        setProjectNumber(data.project.number || null);
+        if (data.project.id) {
+          setProjectNodeId(data.project.id);
+          localStorage.setItem('project-node-id', data.project.id);
+        }
+        // Persist immediately
+        localStorage.setItem('project-url', projectUrl);
+        localStorage.setItem('project-name', data.project.name || '');
+  if (data.project.number != null) localStorage.setItem('project-number', String(data.project.number));
+        showNotification('Project linked', 'success');
+      } else {
+        const err = await res.json();
+        showNotification(err.error || 'Failed to fetch project', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showNotification('Failed to fetch project', 'error');
+    }
+  };
+
+  // Unauthenticated UI
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -359,7 +573,7 @@ export default function Home() {
                   type="password"
                   value={pat}
                   onChange={(e) => setPat(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder="github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
@@ -384,13 +598,13 @@ export default function Home() {
 
           <div className="mt-6 text-xs text-gray-500 space-y-2">
             <p>
-              <strong>Required scopes:</strong> <code>repo</code>, <code>read:user</code>
+              <strong>Required scopes:</strong> <code>issues</code>, <code>organization_models</code>, <code>organization_projects</code>
             </p>
             <p>
               Create a token at{' '}
-              <a 
-                href="https://github.com/settings/tokens/new" 
-                target="_blank" 
+              <a
+                href={`https://github.com/settings/personal-access-tokens/new?target_name=${repoOwner}&description=Used+for+QuickNotes&name=GitHub+QuickNotes+token&metadata=read&issues=write&organization_models=read&organization_projects=write`}
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:text-blue-800"
               >
@@ -409,37 +623,50 @@ export default function Home() {
             </button>
             
             {showSettings && (
-              <div className="mt-3 space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Owner
-                  </label>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Owner</label>
                   <input
                     type="text"
                     value={repoOwner}
                     onChange={(e) => setRepoOwner(e.target.value)}
-                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="github"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Name
-                  </label>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Name</label>
                   <input
                     type="text"
                     value={repoName}
                     onChange={(e) => setRepoName(e.target.value)}
-                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="solutions-engineering"
                   />
                 </div>
-                <button
-                  onClick={updateRepoSettings}
-                  className="w-full bg-blue-600 text-white px-3 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
-                >
-                  Save Settings
-                </button>
+                <div className="flex flex-col sm:col-span-2">
+                  <label className="text-xs font-medium text-gray-700 mb-1">GitHub Project URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={projectUrl}
+                      onChange={(e) => setProjectUrl(e.target.value)}
+                      placeholder="https://github.com/orgs/my-org/projects/123"
+                      className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchProjectFromUrl}
+                      className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                      title="Link project from URL"
+                      aria-label="Link project from URL"
+                    >Link</button>
+                  </div>
+                  {projectName && (
+                    <p className="mt-1 text-xs text-gray-600">Linked: <span className="font-medium">{projectName}</span>{projectNumber !== null && ` (#${projectNumber})`}</p>
+                  )}
+                </div>
+                {/* Removed explicit save button – settings persist live */}
               </div>
             )}
           </div>
@@ -458,45 +685,59 @@ export default function Home() {
             <h1 className="text-xl font-semibold text-gray-900">Quick Notes</h1>
             <span className="text-sm text-gray-500">→ {repoOwner}/{repoName}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-gray-500" />
               <span className="text-sm text-gray-700">{user.name || user.login}</span>
             </div>
+            <div className="flex items-center gap-1.5">
             <button
               onClick={toggleTheme}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title={mounted && theme === 'light' ? 'Switch to dark mode' : mounted && theme === 'dark' ? 'Switch to light mode' : 'Toggle color mode'}
+              className="text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
               aria-label={mounted && theme === 'light' ? 'Enable dark mode' : mounted && theme === 'dark' ? 'Enable light mode' : 'Toggle color mode'}
+              data-tip={mounted && theme === 'light' ? 'Dark mode' : mounted && theme === 'dark' ? 'Light mode' : 'Toggle theme'}
             >
               {mounted ? (theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />) : <Moon className="h-5 w-5 opacity-0" aria-hidden="true" />}
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title="Repository Settings"
+              className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle Repository Settings"
+              data-tip="Repository Settings"
+              aria-pressed={showSettings}
             >
               <Settings className="h-5 w-5" />
             </button>
             <button
+              onClick={() => setShowAISettings(s => !s)}
+              className={`${showAISettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle AI Settings"
+              data-tip="AI Settings"
+              aria-expanded={showAISettings}
+              aria-controls="ai-settings-panel"
+              aria-pressed={showAISettings}
+            >
+              <SlidersHorizontal className="h-5 w-5" />
+            </button>
+            <button
               onClick={handleLogout}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
-              title="Sign out"
+              className="text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
+              aria-label="Log out"
+              data-tip="Sign out"
             >
               <LogOut className="h-5 w-5" />
             </button>
+            </div>
           </div>
         </div>
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="border-t bg-gray-50 px-4 py-3">
+  {/* Repository Settings Panel */}
+  {showSettings && (
+          <div className="border-t bg-gray-50 px-4 py-3" ref={repoSettingsRef}>
             <div className="max-w-4xl mx-auto">
-              <div className="flex items-center gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Owner
-                  </label>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Owner</label>
                   <input
                     type="text"
                     value={repoOwner}
@@ -505,10 +746,8 @@ export default function Home() {
                     placeholder="github"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Repository Name
-                  </label>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Repository Name</label>
                   <input
                     type="text"
                     value={repoName}
@@ -517,15 +756,78 @@ export default function Home() {
                     placeholder="solutions-engineering"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">&nbsp;</label>
-                  <button
-                    onClick={updateRepoSettings}
-                    className="bg-blue-600 text-white px-4 py-2 text-sm rounded hover:bg-blue-700 transition-colors"
-                  >
-                    Update
-                  </button>
+                <div className="flex flex-col md:col-span-2">
+                  <label className="text-xs font-medium text-gray-700 mb-1">GitHub Project URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={projectUrl}
+                      onChange={(e) => setProjectUrl(e.target.value)}
+                      placeholder="https://github.com/orgs/my-org/projects/123"
+                      className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchProjectFromUrl}
+                      className="px-3 py-2 text-xs font-medium rounded bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+                      title="Link project from URL"
+                      aria-label="Link project from URL"
+                    >Link</button>
+                  </div>
+                  {projectName && (
+                    <p className="mt-1 text-[11px] text-gray-600">{projectName}{projectNumber !== null && ` (#${projectNumber})`}</p>
+                  )}
                 </div>
+                <div className="flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Project Number</label>
+                  <input
+                    type="number"
+                    value={projectNumber !== null ? projectNumber : ''}
+                    onChange={(e) => setProjectNumber(e.target.value ? parseInt(e.target.value, 10) : null)}
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="123"
+                  />
+                </div>
+                {/* Removed explicit update button – changes persist live */}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* AI Settings Panel (separate) */}
+        {showAISettings && (
+          <div className="border-t bg-gray-50 px-4 py-3" id="ai-settings-panel" ref={aiSettingsRef}>
+            <div className="max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="md:col-span-2 flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1">Model</label>
+                  <select
+                    value={aiModel}
+                    onChange={(e) => setAiModel(e.target.value)}
+                    className="p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white disabled:opacity-50"
+                    disabled={modelsLoading || !!modelsError}
+                    aria-busy={modelsLoading}
+                    aria-describedby={modelsError ? 'models-error' : undefined}
+                  >
+                    {modelsLoading && <option>Loading models…</option>}
+                    {modelsError && <option>Error loading models</option>}
+                    {!modelsLoading && !modelsError && availableModels.map(m => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  {modelsError && (
+                    <div id="models-error" className="mt-1 text-[11px] text-red-600">{modelsError}</div>
+                  )}
+                </div>
+                <div className="md:col-span-3 flex flex-col">
+                  <label className="text-xs font-medium text-gray-700 mb-1 flex items-center justify-between">System Prompt <button type="button" onClick={() => setAiSystemPrompt(MODEL_SYSTEM_PROMPT)} className="text-[10px] underline text-blue-600 hover:text-blue-800" title="Reset to default system prompt" aria-label="Reset system prompt to default">Reset</button></label>
+                  <textarea
+                    value={aiSystemPrompt}
+                    onChange={(e) => setAiSystemPrompt(e.target.value)}
+                    placeholder="Custom system prompt (leave blank for default)."
+                    className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 min-h-[100px] resize-y"
+                  />
+                </div>
+                <div className="md:col-span-5 text-[11px] text-gray-500">Changes persist locally; cleared on logout.</div>
               </div>
             </div>
           </div>
@@ -536,20 +838,56 @@ export default function Home() {
       <main className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-lg shadow-sm border">
           <div className="p-6">
-            {/* Notes Textarea */}
+            {/* Notes Textarea + AI Format */}
             <div className="mb-6">
               <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
                 Notes
               </label>
-              <textarea
-                id="notes"
-                ref={textareaRef}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Start typing your notes here... (Ctrl/Cmd+Enter to save)"
-                className="w-full p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px]"
-                rows={4}
-              />
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <p className="text-xs text-gray-500 flex-1">Raw notes you can later save as comment or issue.</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotePreview(p => !p)}
+                    aria-pressed={notePreview}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    aria-label={notePreview ? 'Switch to edit mode' : 'Switch to markdown preview'}
+                    data-tip={notePreview ? 'Show editable raw notes' : 'Preview rendered markdown'}
+                  >
+                    {notePreview ? 'Edit' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAIFormat}
+                    disabled={isFormatting || !note.trim()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 bg-white hover:bg-indigo-50 hover:border-indigo-300 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+                    aria-label="Format notes with AI"
+                    data-tip={isFormatting ? 'Formatting in progress' : (!note.trim() ? 'Enter some notes first' : 'Format notes with AI')}
+                  >
+                    <Wand2 className="h-3.5 w-3.5" />
+                    {isFormatting ? 'Formatting…' : 'AI Format'}
+                  </button>
+                </div>
+              </div>
+              {notePreview ? (
+                <div className="w-full p-3 border border-gray-300 rounded-md bg-gray-50 prose prose-sm max-h-[400px] overflow-y-auto dark:bg-[var(--surface-subtle)] dark:prose-invert">
+                  {note.trim() ? (
+                    <Markdown source={note} />
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">Nothing to preview.</p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  id="notes"
+                  ref={textareaRef}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Start typing your notes here... (Ctrl/Cmd+Enter to save)"
+                  className="w-full p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] max-h-[400px] overflow-y-auto"
+                  rows={12}
+                />
+              )}
             </div>
 
             {/* Selected Labels - Always Visible */}
@@ -575,7 +913,8 @@ export default function Home() {
                         <button
                           onClick={() => setSelectedLabels(selectedLabels.filter(l => l !== labelName))}
                           className="ml-1 hover:bg-black hover:bg-opacity-10 rounded-full p-0.5"
-                          title="Remove label"
+                          title={`Remove label ${labelName}`}
+                          aria-label={`Remove label ${labelName}`}
                         >
                           ×
                         </button>
@@ -586,50 +925,71 @@ export default function Home() {
               </div>
             )}
 
-            {/* Label Search */}
+            {/* Label Search + Status (if project) */}
             <div className="mb-6" ref={labelDropdownRef}>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Add Labels
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={labelSearchQuery}
-                  onChange={(e) => {
-                    setLabelSearchQuery(e.target.value);
-                    setShowLabelDropdown(true);
-                  }}
-                  onFocus={() => setShowLabelDropdown(true)}
-                  placeholder="Type to search labels..."
-                  className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                
-                {/* Label Dropdown */}
-                {showLabelDropdown && filteredLabels.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white dark:bg-[var(--surface)] border border-gray-300 dark:border-[var(--border)] rounded-md shadow-lg max-h-48 overflow-y-auto" role="listbox">
-                    {filteredLabels.map((label) => (
-                      <button
-                        key={label.name}
-                        onClick={() => {
-                          setSelectedLabels([...selectedLabels, label.name]);
-                          setLabelSearchQuery('');
-                          setShowLabelDropdown(false);
-                        }}
-                        role="option"
-                        className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: `#${label.color}` }}
-                        />
-                        <div>
-                          <div className="font-medium text-sm leading-snug">{label.name}</div>
-                          {label.description && (
-                            <div className="text-xs text-gray-500 dark:text-[var(--text-muted)] leading-snug">{label.description}</div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+              <div className="flex items-end gap-4 mb-2">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Add Labels
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={labelSearchQuery}
+                      onChange={(e) => {
+                        setLabelSearchQuery(e.target.value);
+                        setShowLabelDropdown(true);
+                      }}
+                      onFocus={() => setShowLabelDropdown(true)}
+                      placeholder="Type to search labels..."
+                      className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {/* Label Dropdown */}
+                    {showLabelDropdown && filteredLabels.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-[var(--surface)] border border-gray-300 dark:border-[var(--border)] rounded-md shadow-lg max-h-48 overflow-y-auto" role="listbox">
+                        {filteredLabels.map((label) => (
+                          <button
+                            key={label.name}
+                            onClick={() => {
+                              setSelectedLabels([...selectedLabels, label.name]);
+                              setLabelSearchQuery('');
+                              setShowLabelDropdown(false);
+                            }}
+                            role="option"
+                            aria-selected={false}
+                            className="w-full text-left p-3 border-b border-gray-100 dark:border-[color-mix(in_srgb,var(--border)_60%,transparent)] last:border-b-0 flex items-center gap-2 text-gray-700 dark:text-[var(--foreground)] hover:bg-gray-50 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_85%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-colors cursor-pointer"
+                            title={`Add label ${label.name}`}
+                            aria-label={`Add label ${label.name}`}
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: `#${label.color}` }}
+                            />
+                            <div>
+                              <div className="font-medium text-sm leading-snug">{label.name}</div>
+                              {label.description && (
+                                <div className="text-xs text-gray-500 dark:text-[var(--text-muted)] leading-snug">{label.description}</div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {projectNodeId && (
+                  <div className="w-44">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                    <select
+                      value={projectStatus}
+                      onChange={(e) => setProjectStatus(e.target.value as 'in-progress' | 'no-status' | 'done')}
+                      className="w-full h-12 px-3 border border-gray-300 rounded-md bg-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      style={{ lineHeight: '1.25rem' }}
+                    >
+                      <option value="in-progress">In Progress</option>
+                      <option value="no-status">No Status</option>
+                      <option value="done">Done</option>
+                    </select>
                   </div>
                 )}
               </div>
@@ -637,19 +997,24 @@ export default function Home() {
 
             {/* Issue Selection */}
             <div className="mb-6">
-              <label htmlFor="issue-search" className="block text-sm font-medium text-gray-700 mb-2">
-                Issue
-              </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <input
-                  id="issue-search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search for existing issues..."
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+              <div className="flex items-end gap-4 mb-2">
+                <div className="flex-1">
+                  <label htmlFor="issue-search" className="block text-sm font-medium text-gray-700 mb-2">
+                    Issue
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      id="issue-search"
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search for existing issues..."
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                {/* Status dropdown moved above into label row */}
               </div>
 
               {/* Issue Suggestions */}
@@ -668,6 +1033,8 @@ export default function Home() {
                           setShowNewIssue(false);
                         }}
                         className="w-full text-left p-3 border-b border-gray-100 last:border-b-0 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 hover:bg-gray-100 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_70%,black)] dark:bg-[var(--surface)]"
+                        title={`Select issue #${issue.number}`}
+                        aria-label={`Select issue #${issue.number}: ${issue.title}`}
                       >
                         <div className="font-medium text-sm">#{issue.number}</div>
                         <div className="text-sm text-gray-600">{issue.title}</div>
@@ -770,6 +1137,92 @@ export default function Home() {
                 View on GitHub →
               </a>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* AI Preview Modal */}
+      {showAIModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="AI formatted notes preview"
+        >
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAIModal(false)} />
+          <div className="relative bg-white dark:bg-[var(--surface)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-[var(--border)]">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-[var(--foreground)]">AI Formatted Preview</h2>
+              <button
+                onClick={() => setShowAIModal(false)}
+                className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-[color-mix(in_srgb,var(--surface-subtle)_70%,black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                aria-label="Close preview"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div ref={aiPreviewRef} className="overflow-y-auto p-5 prose prose-sm max-w-none dark:prose-invert">
+              {aiError && <div className="text-xs mb-2 text-red-600">{aiError}</div>}
+              {!formattedMarkdown && isFormatting && (
+                <div className="text-xs text-gray-500">Formatting in progress…</div>
+              )}
+              {formattedMarkdown && !showRaw && (
+                <Markdown source={formattedMarkdown} />
+              )}
+              {formattedMarkdown && showRaw && (
+                <pre
+                  className="text-xs whitespace-pre-wrap bg-gray-100 dark:bg-[var(--surface-subtle)] dark:text-[var(--foreground)] p-3 rounded-md border border-gray-200 dark:border-[var(--border)] overflow-x-auto max-h-[60vh] font-mono leading-relaxed"
+                >
+                  {formattedMarkdown}
+                </pre>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-200 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--surface-subtle)]">
+              {isFormatting ? (
+                <button
+                  onClick={() => abortFormatting()}
+                  className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  title="Stop formatting"
+                  aria-label="Stop formatting"
+                >
+                  Stop
+                </button>
+              ) : (
+                formattedMarkdown && (
+                  <button
+                    onClick={() => setShowRaw(r => !r)}
+                    className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 inline-flex items-center gap-2"
+                    title={showRaw ? 'Show formatted preview' : 'Show raw markdown source'}
+                    aria-label={showRaw ? 'Show formatted preview' : 'Show raw markdown source'}
+                  >
+                    {showRaw ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    {showRaw ? 'Show Preview' : 'Show Raw'}
+                  </button>
+                )
+              )}
+              <button
+                onClick={() => {
+                  abortFormatting();
+                  setShowAIModal(false);
+                }}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setNote(formattedMarkdown);
+                  setShowAIModal(false);
+                  showNotification('Applied AI formatting', 'success');
+                }}
+                disabled={!formattedMarkdown.trim() || isFormatting}
+                className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                title="Replace current notes with AI formatted content"
+                aria-label="Accept AI formatted content and replace current notes"
+              >
+                {isFormatting && !formattedMarkdown ? 'Waiting…' : 'Accept & Replace'}
+              </button>
+            </div>
           </div>
         </div>
       )}

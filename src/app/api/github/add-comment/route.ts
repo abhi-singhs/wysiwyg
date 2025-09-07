@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    const { issueNumber, body, repoOwner, repoName } = await request.json();
+  const { issueNumber, body, repoOwner, repoName, projectNodeId, projectStatus } = await request.json();
 
     if (!issueNumber || !body) {
       return NextResponse.json(
@@ -55,6 +55,61 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Repository or issue not found or inaccessible with this token' }, { status: 404 });
       }
       throw err;
+    }
+
+    // Optionally add to project if projectNodeId provided (best-effort, ignore errors)
+    if (projectNodeId) {
+      try {
+        const issueNodeQuery = `
+          query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) { issue(number: $number) { id } }
+          }
+        `;
+        const issueNodeData = await octokit.graphql<{ repository?: { issue?: { id: string } | null } | null }>(issueNodeQuery, {
+          owner,
+          repo,
+          number: issueNumber,
+        });
+        const issueId = issueNodeData.repository?.issue?.id;
+        if (issueId) {
+          const addIssueMutation = `
+            mutation($projectId: ID!, $contentId: ID!) {
+              addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } }
+            }
+          `;
+          const addResult = await octokit.graphql<{ addProjectV2ItemById?: { item?: { id: string } } }>(addIssueMutation, { projectId: projectNodeId, contentId: issueId });
+          if (projectStatus && addResult?.addProjectV2ItemById?.item?.id) {
+            try {
+              const projectFieldsQuery = `
+                query($projectId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } }
+                  }
+                }
+              `;
+              type SingleSelectField = { id: string; name?: string; options?: Array<{ id: string; name: string }> };
+              const fieldsData = await octokit.graphql<{ node?: { fields?: { nodes?: SingleSelectField[] } } }>(projectFieldsQuery, { projectId: projectNodeId });
+              const selectField = fieldsData.node?.fields?.nodes?.find(f => f.name === 'Status' && f.options && Array.isArray(f.options));
+              const optionValue = projectStatus === 'in-progress' ? 'In Progress' : projectStatus === 'done' ? 'Done' : 'No Status';
+              if (selectField && selectField.options) {
+                const option = selectField.options.find(o => o.name.toLowerCase() === optionValue.toLowerCase());
+                if (option) {
+                  const setStatusMutation = `
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                      updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) { projectV2Item { id } }
+                    }
+                  `;
+                  await octokit.graphql(setStatusMutation, { projectId: projectNodeId, itemId: addResult.addProjectV2ItemById.item.id, fieldId: selectField.id, optionId: option.id });
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to set project status on comment:', e);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to add existing issue to project on comment:', err);
+      }
     }
 
     return NextResponse.json({

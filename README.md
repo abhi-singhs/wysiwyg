@@ -6,21 +6,29 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 
 **Ready to use immediately** - No installation required! Just visit [quicknotes.gupta-kartik.com](https://quicknotes.gupta-kartik.com) and start capturing notes.
 
-![Quick Notes Authentication Screen](https://github.com/user-attachments/assets/7e25adf6-c698-41d3-9ef3-88c9c815dc5d)
+![Login Page](public/login.png)
 
 ## Features
 
-- **🚀 Lightning-fast note capture** - Minimal UI focused on speed
-- **🔍 Smart Issue search** - Auto-suggest Issues based on keywords with debounced search
-- **💾 Seamless GitHub integration** - Save notes as comments or create new Issues
-- **🏷️ Label management** - Select from repository labels when creating Issues
-- **⌨️ Keyboard shortcuts** - Ctrl/Cmd+Enter to save instantly
-- **🔑 Simple authentication** - GitHub Personal Access Token (no OAuth setup needed)
-- **⚙️ Configurable repositories** - Switch between repositories on-the-fly
-- **📱 Responsive design** - Works great on desktop and tablet
-- **♿ Accessible** - WCAG AA compliant with proper focus management
+- **🚀 Lightning-fast note capture** – Minimal UI focused on speed
+- **🔍 Smart Issue search** – Debounced search with live suggestions
+- **💾 GitHub integration** – Save notes as Issue comments or create new Issues
+- **🏷️ Label management** – Pick from repository labels
+- **📌 Project (Projects V2) linking** – Paste a Project URL to associate issues
+- **🧩 Auto project assignment** – Issues & comments auto-added when linked
+- **📊 Status control** – Apply project Status (In Progress / No Status / Done)
+- **� Self-assignment** – New issues auto assign the authenticated user
+- **🤖 AI Markdown formatting** – Streaming cleanup via GitHub Models
+- **⚙️ AI settings panel** – Choose model + customize system prompt (persisted locally)
+- **🔄 Dynamic model list** – Fetched from public GitHub Models catalog with fallback
+- **�️ Local persistence** – Repo, project, AI prefs, theme retained (cleared on logout)
+- **⌨️ Keyboard shortcuts** – Ctrl/Cmd+Enter to save
+- **🌓 Theme toggle** – Light/Dark persisted per device
+- **🎯 Instant tooltips** – Fast `[data-tip]` tooltips for all action buttons
+- **♿ Accessibility first** – Focus rings, ARIA labeling, semantic structure
+- **� Responsive** – Desktop & tablet friendly
 
-![Main Interface](https://github.com/user-attachments/assets/894d54aa-e857-4c8f-9cba-ae8cdc5862de)
+![Home Page](public/home.png)
 
 ## Quick Start
 
@@ -49,7 +57,7 @@ Visit `http://localhost:3000` for local development.
 4. **Quick label selection** - Multi-select from predefined repository labels
 5. **Simple authentication** - GitHub Personal Access Token for quick setup
 
-![New Issue Creation](https://github.com/user-attachments/assets/3377ae0c-d513-4896-a399-2edc4fde0050)
+![New Issue Creation](public/new-issue.png)
 
 ## Tech Stack
 
@@ -64,12 +72,13 @@ Visit `http://localhost:3000` for local development.
 
 To use the app (live or locally), you'll need a GitHub PAT:
 
-1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens/new)
-2. Click "Generate new token (classic)"
+1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/personal-access-tokens/new)
+2. Click "Generate new token"
 3. Give it a name like "Quick Notes App"
-4. Select these scopes:
-   - `repo` - Full control of repositories
-   - `read:user` - Read user profile data
+4. Select these scopes (minimum):
+   - `issue` – create/search issues, labels
+   - `organization_projects` fine‑grained: access to Issues + Projects
+   - `organization_models:read`
 5. Click "Generate token" and copy it
 6. Enter it in the app when prompted
 
@@ -92,12 +101,30 @@ To use the app (live or locally), you'll need a GitHub PAT:
 2. **Click "Create new issue"**
 3. **Enter a title** for the Issue
 4. **Select labels** from the available options
-5. **Save** to create the Issue with your notes as the description
+5. (Optional) Pick a **Status** (if a Project is linked) near Labels
+6. **Save** – Issue is created, self-assigned, added to Project, status applied
 
-### Repository Configuration
+### Repository & Project Configuration
 - **Settings Panel**: Click the settings icon in the header
-- **Change on-the-fly**: Switch repositories without restarting
-- **Persistent**: Settings are saved in browser storage
+- **Change on-the-fly**: Switch repositories instantly
+- **Project Link**: Paste `https://github.com/orgs/<org>/projects/<number>` and Link
+- **Default Status**: Choose Status for new/updated items (In Progress / No Status / Done)
+- **Persistent**: Stored in localStorage & cleared on logout
+
+#### Stored Keys (localStorage)
+| Key | Purpose |
+| --- | --- |
+| `github-pat` | Personal Access Token |
+| `repo-owner` | Repository owner |
+| `repo-name` | Repository name |
+| `project-url` | Linked Project URL |
+| `project-name` | Project name |
+| `project-number` | Project number |
+| `project-node-id` | GraphQL node id for mutations |
+| `project-status` | Preferred default Status |
+| `ai-model` | Selected AI model id |
+| `ai-system-prompt` | Custom system prompt override |
+| `theme` | UI theme (light/dark) |
 
 ## Development Setup
 
@@ -121,21 +148,45 @@ The application includes these API endpoints:
 
 - `GET /api/github/user` - Validate PAT and get user info
 - `GET /api/github/search-issues?q=query&owner=owner&repo=repo` - Search repository Issues  
-- `POST /api/github/create-issue` - Create new Issue with labels
-- `POST /api/github/add-comment` - Add comment to existing Issue
+- `POST /api/github/create-issue` - Create Issue (labels, self-assign, optional project + status)
+- `POST /api/github/add-comment` - Add comment (optional project add + status)
 - `GET /api/github/labels?owner=owner&repo=repo` - Fetch repository labels
+- `POST /api/github/format-notes` - Format raw notes into structured Markdown (streaming)
+- `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
+- `GET /api/github/models` - Fetch dynamic model catalog (public GitHub Models) with simplification
+
+### AI Formatting & AI Settings
+Use the "AI Format" button above the notes textarea to:
+
+1. Send your in-progress raw notes to the GitHub Models API (model: `openai/gpt-4.1`).
+2. Receive a structured Markdown draft (Summary, Context, Steps, Findings, Next Actions, etc.).
+3. Preview the result in a modal with full Markdown rendering.
+4. Accept to replace your current notes or Cancel to keep editing.
+
+Implementation details:
+- Uses `@azure-rest/ai-inference` SDK pointed at `https://models.github.ai/inference`.
+- Streaming responses progressively populate preview (auto-scroll if at bottom).
+- Low temperature (0.2) for structural determinism.
+- Dynamic model list fetched from public catalog; if it fails a curated fallback list is used.
+- Custom system prompt stored locally and resettable with one click.
+- PAT forwarded only per request (never persisted server-side).
+
+Your token is never stored server-side; it's only forwarded in-memory for the model call during the active request.
 
 ## Required GitHub Token Scopes
 
-- **`repo`**: Required to create issues, add comments, and search issues
-- **`read:user`**: Required to get user information for attribution
+Minimal (current features):
+- `issue` create/search issues, labels
+- `organization_projects` fine‑grained: access to Issues + Projects
+- `organization_models:read`
+
 
 ## Security Features
 
-- **PAT Authentication** - Simple and secure token-based authentication
-- **Client-side storage** - Token stored in browser localStorage only
-- **API Protection** - All GitHub API routes require valid token
-- **Easy revocation** - Users can revoke/rotate tokens anytime in GitHub settings
+- **PAT Authentication** - No server persistence
+- **Client-side storage** - Token & settings in localStorage only
+- **API Protection** - All GitHub routes require bearer token
+- **Easy revocation** - Revoke PAT in GitHub anytime
 
 ## Accessibility
 
@@ -152,9 +203,23 @@ The application includes these API endpoints:
 - Generate a new token if needed
 
 ### Repository Not Found
-- Verify the repository owner and name are correct
-- Ensure your token has access to the repository
-- Check if the repository is private and your token has appropriate permissions
+- Check owner/name spelling
+- Token must include repo access (private repo permissions)
+
+### Project Not Linking
+- PAT must include project scope / access
+- URL must match `https://github.com/orgs/<org>/projects/<number>`
+
+### Status Not Updating
+- Project needs a single-select field named `Status`
+- Options must include: In Progress, No Status, Done
+
+### AI Formatting Not Working
+- Authenticate first (valid PAT)
+- Ensure notes not empty & < ~8k chars
+- Try another model if list available
+- Check network console for `/api/github/format-notes`
+- Fallback model list should appear if catalog fails (see tooltip on selector if error)
 
 ## Contributing
 

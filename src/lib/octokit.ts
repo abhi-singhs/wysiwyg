@@ -1,7 +1,7 @@
 import { Octokit } from '@octokit/rest';
 
 /**
- * Factory for Octokit instances configured for both classic and fine-grained PATs.
+ * Factory for Octokit instances configured for fine-grained PATs.
  * Adds recommended preview + API version headers. Centralizes future tweaks (e.g. retry, throttling).
  */
 export function createOctokit(token: string) {
