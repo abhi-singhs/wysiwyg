@@ -154,7 +154,6 @@ The application includes these API endpoints:
 - `POST /api/github/format-notes` - Format raw notes into structured Markdown (streaming)
 - `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
 - `GET /api/github/models` - Fetch dynamic model catalog (public GitHub Models) with simplification
-- `GET /api/github/config` - Static config + fallback metadata
 
 ### AI Formatting & AI Settings
 Use the "AI Format" button above the notes textarea to:
