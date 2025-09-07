@@ -15,7 +15,11 @@
   --focus-ring: #2563eb;
 }
 
-/* Removed unsupported @theme rule (was causing build error) */
+/* 
+  The @theme rule was removed because it is not supported by PostCSS/Tailwind and caused a build error.
+  Intended functionality: to manage theme variables (colors, etc.) for light/dark modes.
+  Alternative: Use CSS custom properties (as defined below) or configure themes via tailwind.config.js for consistent theming.
+*/
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {

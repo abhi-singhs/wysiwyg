@@ -287,20 +287,24 @@ export default function Home() {
     validatePat(pat);
   };
 
+  const LOCALSTORAGE_KEYS_TO_CLEAR = [
+    'github-pat',
+    'project-url',
+    'project-name',
+    'project-number',
+    'project-node-id',
+    'project-status',
+    'ai-model',
+    'ai-system-prompt',
+    // Legacy keys cleanup (older implementation used these)
+    'project',
+    'project-id',
+  ];
+
   const handleLogout = () => {
     setPat('');
     setUser(null);
-    localStorage.removeItem('github-pat');
-    localStorage.removeItem('project-url');
-    localStorage.removeItem('project-name');
-  localStorage.removeItem('project-number');
-  localStorage.removeItem('project-node-id');
-  localStorage.removeItem('project-status');
-  localStorage.removeItem('ai-model');
-  localStorage.removeItem('ai-system-prompt');
-  // Legacy keys cleanup (older implementation used these)
-  localStorage.removeItem('project');
-  localStorage.removeItem('project-id');
+    LOCALSTORAGE_KEYS_TO_CLEAR.forEach(key => localStorage.removeItem(key));
     setNote('');
     setSelectedIssue(null);
     setShowNewIssue(false);
@@ -311,9 +315,9 @@ export default function Home() {
     setSearchQuery('');
     setProjectUrl('');
     setProjectName('');
-  setProjectNumber(null);
-  setProjectNodeId(null);
-  setProjectStatus('in-progress');
+    setProjectNumber(null);
+    setProjectNodeId(null);
+    setProjectStatus('in-progress');
   };
 
   // Live persistence of repository & project settings
