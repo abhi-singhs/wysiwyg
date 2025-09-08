@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { DEFAULT_MODEL_ID, buildMessages } from '@/lib/modelClient';
 
 interface UseAIFormatterOptions {
   token: string | null;
@@ -49,22 +50,25 @@ export function useAIFormatter({ token, orgOwner, modelId, systemPrompt }: UseAI
     setError(null);
     setIsFormatting(true);
     try {
-      const params = new URLSearchParams();
-      params.set('stream', '1');
-      if (orgOwner) params.set('orgOwner', orgOwner);
-      if (modelId) params.set('modelId', modelId);
-      const resp = await fetch(`/api/github/format-notes?${params.toString()}`, {
+      const owner = orgOwner || 'github';
+      const model = (modelId || DEFAULT_MODEL_ID).trim();
+      const endpoint = `https://models.github.ai/orgs/${owner}/inference/chat/completions`;
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ content, modelId, systemPrompt }),
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          top_p: 1,
+          stream: true,
+          messages: buildMessages(content, systemPrompt),
+        }),
         signal: controller.signal,
       });
-      if (!resp.ok || !resp.body) {
-        throw new Error(`Streaming failed (${resp.status})`);
-      }
+      if (!resp.ok || !resp.body) throw new Error(`Streaming failed (${resp.status})`);
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let acc = '';
@@ -73,25 +77,20 @@ export function useAIFormatter({ token, orgOwner, modelId, systemPrompt }: UseAI
         if (done) break;
         if (!value) continue;
         const chunk = decoder.decode(value, { stream: true });
-        // Split SSE events (blank line separated)
-        const events = chunk.split(/\n\n/).filter(Boolean);
-        for (const evt of events) {
-          if (evt.startsWith('event: end')) break outer;
-          if (evt.startsWith('event: error')) {
-            const line = evt.split('\n').find(l => l.startsWith('data: '));
-            if (line) setError(line.substring(6).trim());
-            break outer;
-          }
-          if (!evt.startsWith('data: ')) continue; // ignore non-data lines
-          let payload = evt.substring(6).trim();
-          // Some upstream lines may already include an inner 'data: ' prefix; strip one more time.
-          if (payload.startsWith('data: ')) payload = payload.substring(6).trim();
-          if (payload === '[DONE]') break outer;
+        const lines = chunk.split(/\n/).filter(Boolean);
+  for (const rawLine of lines) {
+          let line = rawLine.trim();
+          if (!line) continue;
+          const doneSignal = line === '[DONE]';
+          // OpenAI / GitHub Models style SSE sometimes prefixes 'data: '
+          if (line.startsWith('data: ')) line = line.substring(6).trim();
+          if (line === '[DONE]') break outer;
           let extracted = '';
           try {
             type DeltaLike = { content?: unknown; text?: unknown } | string;
             type ChoiceLike = { delta?: DeltaLike; message?: DeltaLike };
             interface ObjectLike { [k: string]: unknown; choices?: ChoiceLike[]; delta?: DeltaLike; message?: DeltaLike; content?: unknown; text?: unknown; }
+            const payload = line;
             const json = JSON.parse(payload) as unknown;
             const pushDelta = (d: unknown) => {
               if (!d) return;
@@ -128,13 +127,10 @@ export function useAIFormatter({ token, orgOwner, modelId, systemPrompt }: UseAI
               else pushDelta(obj);
             } else if (typeof json === 'string') extracted += json;
           } catch {
-            // Not JSON; ignore unless first accumulation (to avoid clutter)
-            if (!acc) extracted += payload;
+            if (!acc) extracted += line; // raw fallback
           }
-          if (extracted) {
-            acc += extracted;
-            setFormatted(acc);
-          }
+          if (extracted) { acc += extracted; setFormatted(acc); }
+          if (doneSignal) break outer;
         }
       }
     } catch (e) {
