@@ -160,8 +160,9 @@ export async function fetchProject(token: string, org: string, number: number): 
 export async function listModels(token: string): Promise<{ id: string; label: string }[]> {
   requireToken(token); // keep signature parity even though token not needed for static file
   try {
-    // Weekly-updated snapshot produced by GitHub Actions (public/models-catalog.json)
-    const res = await fetch('/models-catalog.json', { cache: 'no-store' });
+    // Use current URL origin for fetch
+    const url = `${window.location.origin}/models-catalog.json`;
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`local catalog status ${res.status}`);
     const data: unknown = await res.json();
     // Narrow unknown JSON shape to expected catalog structure without using 'any'
