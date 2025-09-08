@@ -82,6 +82,37 @@ export default function Home() {
   const labelDropdownRef = useRef<HTMLDivElement>(null);
   const repoSettingsRef = useRef<HTMLDivElement>(null);
   const aiSettingsRef = useRef<HTMLDivElement>(null);
+  const repoSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const aiSettingsButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close settings panels when clicking outside
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (showSettings) {
+        if (
+          repoSettingsRef.current &&
+          !repoSettingsRef.current.contains(target) &&
+          repoSettingsButtonRef.current &&
+          !repoSettingsButtonRef.current.contains(target)
+        ) {
+          setShowSettings(false);
+        }
+      }
+      if (showAISettings) {
+        if (
+          aiSettingsRef.current &&
+          !aiSettingsRef.current.contains(target) &&
+          aiSettingsButtonRef.current &&
+          !aiSettingsButtonRef.current.contains(target)
+        ) {
+          setShowAISettings(false);
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showSettings, showAISettings]);
 
   // Filtered labels based on search query
   const filteredLabels = availableLabels.filter(label => 
@@ -364,27 +395,6 @@ export default function Home() {
       }
     };
 
-  const fetchProjectFromUrl = async () => {
-    if (!projectUrl.trim()) {
-      showNotification('Enter a GitHub Project URL', 'error');
-      return;
-    }
-    const parsed = parseProjectUrl(projectUrl);
-    if (!parsed) {
-      showNotification('Invalid project URL format', 'error');
-      return;
-    }
-    if (!pat) {
-      showNotification('Authenticate first', 'error');
-      return;
-    }
-    try {
-      const p = await ghFetchProject(pat, parsed.org, parsed.number);
-      setProjectName(p.name); setProjectNumber(p.number || null); setProjectNodeId(p.id); localStorage.setItem('project-node-id', p.id);
-      localStorage.setItem('project-url', projectUrl); localStorage.setItem('project-name', p.name || ''); if (p.number != null) localStorage.setItem('project-number', String(p.number)); showNotification('Project linked', 'success');
-    } catch (e) { console.error(e); showNotification('Failed to fetch project', 'error'); }
-  };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
@@ -404,7 +414,7 @@ export default function Home() {
     } catch { return null; }
   };
 
-  // Provide fetchProjectFromUrl in outer scope (moved during refactor)
+  // Project link helper (exposed for button handlers)
   const fetchProjectFromUrl = async () => {
     if (!projectUrl.trim()) { showNotification('Enter a GitHub Project URL', 'error'); return; }
     const parsed = parseProjectUrl(projectUrl);
@@ -416,9 +426,6 @@ export default function Home() {
       localStorage.setItem('project-url', projectUrl); localStorage.setItem('project-name', p.name || ''); if (p.number != null) localStorage.setItem('project-number', String(p.number)); showNotification('Project linked', 'success');
     } catch (e) { console.error(e); showNotification('Failed to fetch project', 'error'); }
   };
-
-  // no-op usage to satisfy linter when panel hidden (kept for future triggers)
-  const _ensureFetchProjectRef = fetchProjectFromUrl;
 
   // Unauthenticated UI
   if (!user) {
@@ -497,10 +504,13 @@ export default function Home() {
           <div className="mt-4 border-t pt-4">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800"
+              ref={repoSettingsButtonRef}
+              className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle Repository Settings"
+              data-tip="Repository Settings"
+              aria-pressed={showSettings}
             >
-              <Settings className="h-4 w-4" />
-              Repository Settings
+              <Settings className="h-5 w-5" />
             </button>
             
             {showSettings && (
@@ -582,6 +592,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
+              ref={repoSettingsButtonRef}
               className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
               aria-label="Toggle Repository Settings"
               data-tip="Repository Settings"
@@ -591,6 +602,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowAISettings(s => !s)}
+              ref={aiSettingsButtonRef}
               className={`${showAISettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
               aria-label="Toggle AI Settings"
               data-tip="AI Settings"

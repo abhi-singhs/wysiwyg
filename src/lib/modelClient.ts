@@ -1,21 +1,5 @@
-import ModelClient from '@azure-rest/ai-inference';
-import { AzureKeyCredential } from '@azure/core-auth';
-
-// Default model (mirrors previous hard-coded value)
+// Default model id used throughout the app
 export const DEFAULT_MODEL_ID = 'openai/gpt-4.1';
-
-export interface ModelClientConfig {
-  token: string;
-  modelId?: string;
-  orgOwner?: string; // maps to GitHub org/owner for multi-org endpoints
-}
-
-export function createModelClient({ token, modelId, orgOwner }: ModelClientConfig) {
-  const owner = orgOwner || process.env.GITHUB_REPO_OWNER || 'github';
-  const endpoint = `https://models.github.ai/orgs/${owner}/inference`;
-  const client = ModelClient(endpoint, new AzureKeyCredential(token));
-  return { client, model: modelId || DEFAULT_MODEL_ID, endpoint };
-}
 
 // Default system prompt (exported so UI can show & reset)
 export const MODEL_SYSTEM_PROMPT = `You are an assistant that reformats raw, messy engineering meeting or troubleshooting notes into clean, concise, well-structured GitHub issue/comment ready Markdown.
