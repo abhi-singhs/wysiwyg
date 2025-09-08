@@ -82,6 +82,37 @@ export default function Home() {
   const labelDropdownRef = useRef<HTMLDivElement>(null);
   const repoSettingsRef = useRef<HTMLDivElement>(null);
   const aiSettingsRef = useRef<HTMLDivElement>(null);
+  const repoSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const aiSettingsButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close settings panels when clicking outside
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (showSettings) {
+        if (
+          repoSettingsRef.current &&
+          !repoSettingsRef.current.contains(target) &&
+          repoSettingsButtonRef.current &&
+          !repoSettingsButtonRef.current.contains(target)
+        ) {
+          setShowSettings(false);
+        }
+      }
+      if (showAISettings) {
+        if (
+          aiSettingsRef.current &&
+          !aiSettingsRef.current.contains(target) &&
+          aiSettingsButtonRef.current &&
+          !aiSettingsButtonRef.current.contains(target)
+        ) {
+          setShowAISettings(false);
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showSettings, showAISettings]);
 
   // Filtered labels based on search query
   const filteredLabels = availableLabels.filter(label => 
@@ -404,7 +435,6 @@ export default function Home() {
     } catch { return null; }
   };
 
-  // Provide fetchProjectFromUrl in outer scope (moved during refactor)
   const fetchProjectFromUrl = async () => {
     if (!projectUrl.trim()) { showNotification('Enter a GitHub Project URL', 'error'); return; }
     const parsed = parseProjectUrl(projectUrl);
@@ -497,10 +527,13 @@ export default function Home() {
           <div className="mt-4 border-t pt-4">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800"
+              ref={repoSettingsButtonRef}
+              className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
+              aria-label="Toggle Repository Settings"
+              data-tip="Repository Settings"
+              aria-pressed={showSettings}
             >
-              <Settings className="h-4 w-4" />
-              Repository Settings
+              <Settings className="h-5 w-5" />
             </button>
             
             {showSettings && (
@@ -582,6 +615,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
+              ref={repoSettingsButtonRef}
               className={`${showSettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
               aria-label="Toggle Repository Settings"
               data-tip="Repository Settings"
@@ -591,6 +625,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowAISettings(s => !s)}
+              ref={aiSettingsButtonRef}
               className={`${showAISettings ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-gray-500 hover:text-gray-700'} transition-colors border border-transparent rounded-md p-1.5 cursor-pointer`}
               aria-label="Toggle AI Settings"
               data-tip="AI Settings"

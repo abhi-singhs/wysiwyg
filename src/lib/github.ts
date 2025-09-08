@@ -158,36 +158,22 @@ export async function fetchProject(token: string, org: string, number: number): 
 
 // Public model catalog (no org scoping needed but keep signature stable)
 export async function listModels(token: string): Promise<{ id: string; label: string }[]> {
-  requireToken(token);
-  const endpoint = 'https://models.github.ai/catalog/models';
-  interface Entry { id?: string; slug?: string; name?: string; displayName?: string }
-  const attempt = async (withAuth: boolean) => {
-    const headers: Record<string, string> = { 'Accept': 'application/json' };
-    if (withAuth) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(endpoint, { headers, cache: 'no-store', mode: 'cors' });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    return res.json() as unknown;
-  };
+  requireToken(token); // keep signature parity even though token not needed for static file
   try {
-    let raw: unknown;
-    try {
-      raw = await attempt(true);
-    } catch {
-      // Retry without Authorization (public catalog often works unauthenticated)
-      raw = await attempt(false);
-    }
-    let list: Entry[] = [];
-    if (Array.isArray(raw)) list = raw.filter(r => typeof r === 'object' && r) as Entry[];
-    else if (raw && typeof raw === 'object') {
-      const candidate = (raw as { models?: unknown }).models;
-      if (Array.isArray(candidate)) list = candidate.filter(r => typeof r === 'object' && r) as Entry[];
-    }
-    const simplified = list.map(m => ({ id: m.id || m.slug || m.name || '', label: m.displayName || m.name || m.id || m.slug || 'Model' }))
+    // Weekly-updated snapshot produced by GitHub Actions (public/models-catalog.json)
+    const res = await fetch('/models-catalog.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`local catalog status ${res.status}`);
+    const data: unknown = await res.json();
+    const rawList = (data && typeof data === 'object' && Array.isArray((data as any).models)) ? (data as any).models : [];
+    interface SnapshotEntry { id?: string; label?: string }
+    const cleaned = (rawList as SnapshotEntry[])
+      .filter(m => m && (m.id || m.label))
+      .map(m => ({ id: (m.id || '').trim(), label: (m.label || m.id || '').trim() }))
       .filter(m => m.id);
-    if (!simplified.length) throw new Error('empty');
-    return simplified;
+    if (cleaned.length) return cleaned;
+    throw new Error('empty snapshot');
   } catch (e) {
-    console.warn('Model catalog fetch failed, using fallback:', e);
-    return CURATED_MODELS; // fallback curated list
+    console.warn('Using curated fallback models (snapshot unavailable):', e);
+    return CURATED_MODELS;
   }
 }
