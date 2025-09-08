@@ -1,7 +1,13 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
+
+// Allow specifying repository subfolder for GitHub Pages e.g. /my-repo
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: 'export',
+  images: { unoptimized: true },
+  assetPrefix: basePath || undefined,
+  basePath: basePath || undefined,
 };
 
 export default nextConfig;

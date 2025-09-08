@@ -143,35 +143,34 @@ GITHUB_REPO_OWNER=your-org
 GITHUB_REPO_NAME=your-repo
 ```
 
-### API Routes
-The application includes these API endpoints:
+### Client-Side Only Architecture
+All previous API route logic now executes entirely in the browser:
 
-- `GET /api/github/user` - Validate PAT and get user info
-- `GET /api/github/search-issues?q=query&owner=owner&repo=repo` - Search repository Issues  
-- `POST /api/github/create-issue` - Create Issue (labels, self-assign, optional project + status)
-- `POST /api/github/add-comment` - Add comment (optional project add + status)
-- `GET /api/github/labels?owner=owner&repo=repo` - Fetch repository labels
-- `POST /api/github/format-notes` - Format raw notes into structured Markdown (streaming)
-- `GET /api/github/project?org=ORG&number=N` - Fetch single Project metadata (id, name, number)
-- `GET /api/github/models` - Fetch dynamic model catalog (public GitHub Models) with simplification
+| Capability | Former Route | Current Implementation |
+| ---------- | ------------ | ---------------------- |
+| Validate user | `/api/github/user` | Direct Octokit call (`users.getAuthenticated`) |
+| Search issues | `/api/github/search-issues` | GraphQL `search` query via Octokit |
+| Create issue | `/api/github/create-issue` | Octokit REST + GraphQL for Project linking |
+| Add comment | `/api/github/add-comment` | Octokit REST + GraphQL for optional Project linking |
+| Labels | `/api/github/labels` | Octokit paginate labels endpoint |
+| Project fetch | `/api/github/project` | GraphQL `projectV2` query |
+| AI formatting | `/api/github/format-notes` | Direct streaming POST to `models.github.ai` |
+| Model catalog | `/api/github/models` | Direct fetch to public catalog endpoint |
+
+Your PAT is never sent to any custom backend—only to `api.github.com` & `models.github.ai`.
 
 ### AI Formatting & AI Settings
-Use the "AI Format" button above the notes textarea to:
+1. Click "AI Format" to stream a cleaned Markdown version using the selected model.
+2. Streaming text appears live; toggle Raw / Preview.
+3. Accept to replace current notes, or close to discard.
 
-1. Send your in-progress raw notes to the GitHub Models API (model: `openai/gpt-4.1`).
-2. Receive a structured Markdown draft (Summary, Context, Steps, Findings, Next Actions, etc.).
-3. Preview the result in a modal with full Markdown rendering.
-4. Accept to replace your current notes or Cancel to keep editing.
+Details:
+* Direct streaming fetch to `https://models.github.ai/orgs/<owner>/inference/chat/completions` with `stream: true`.
+* Adaptive parser supports multiple provider delta shapes.
+* System prompt configurable & persisted in localStorage.
+* Fallback curated list if catalog fetch fails.
 
-Implementation details:
-- Uses `@azure-rest/ai-inference` SDK pointed at `https://models.github.ai/inference`.
-- Streaming responses progressively populate preview (auto-scroll if at bottom).
-- Low temperature (0.2) for structural determinism.
-- Dynamic model list fetched from public catalog; if it fails a curated fallback list is used.
-- Custom system prompt stored locally and resettable with one click.
-- PAT forwarded only per request (never persisted server-side).
-
-Your token is never stored server-side; it's only forwarded in-memory for the model call during the active request.
+No server relay involved.
 
 ## Required GitHub Token Scopes
 
@@ -218,8 +217,30 @@ Minimal (current features):
 - Authenticate first (valid PAT)
 - Ensure notes not empty & < ~8k chars
 - Try another model if list available
-- Check network console for `/api/github/format-notes`
-- Fallback model list should appear if catalog fails (see tooltip on selector if error)
+- Check network console for requests to `models.github.ai`
+- Fallback model list should appear if catalog fails (see selector message)
+
+## GitHub Pages Deployment
+
+Static export is enabled via `output: 'export'` in `next.config.ts`.
+
+### Workflow
+GitHub Actions workflow: `.github/workflows/pages.yml`.
+
+It:
+1. Detects if deploying to user/org site vs project site.
+2. Sets `NEXT_PUBLIC_BASE_PATH` to `/<repo>` when needed.
+3. Runs `npm run export` (which performs `next build`).
+4. Uploads `out/` to Pages.
+
+### Local Simulation
+```bash
+NEXT_PUBLIC_BASE_PATH=/your-repo-name npm run export
+npx serve out
+```
+
+### Token Security
+All GitHub + AI calls are client-side; PAT never hits your Pages origin.
 
 ## Contributing
 
