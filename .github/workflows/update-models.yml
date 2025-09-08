@@ -46,10 +46,9 @@ jobs:
           EOF
       - name: Commit if changed
         run: |
-          if git diff --quiet public/models-catalog.json; then
-            echo "No changes."; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/models-catalog.json
-          git commit -m "chore: update models catalog"
+          git add public/models-catalog.json || true
+          # Always create a commit (even if no file changes) for auditing purposes.
+          git commit --allow-empty -m "chore: update models catalog $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
           git push
