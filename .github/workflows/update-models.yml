@@ -1,0 +1,43 @@
+name: Update Models Catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 0"  # Weekly (Sundays 00:00 UTC)
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch models catalog
+        run: |
+          curl -sL https://models.github.ai/catalog/models > /tmp/raw.json || exit 1
+          node - <<'EOF'
+          const fs = require('fs');
+          try {
+            const raw = JSON.parse(fs.readFileSync('/tmp/raw.json','utf8'));
+            const list = Array.isArray(raw) ? raw
+              : (raw && Array.isArray(raw.models) ? raw.models : []);
+            const simplified = list.map(m => ({
+              id: m.id || m.slug || m.name,
+              label: m.displayName || m.name || m.id || m.slug || 'Model'
+            })).filter(x => x.id);
+            const payload = { updated: new Date().toISOString(), models: simplified };
+            fs.writeFileSync('public/models-catalog.json', JSON.stringify(payload, null, 2) + '\n');
+          } catch (e) {
+            console.error('Failed to process models catalog', e);
+            process.exit(1);
+          }
+          EOF
+      - name: Commit if changed
+        run: |
+          if git diff --quiet public/models-catalog.json; then
+            echo "No changes."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/models-catalog.json
+          git commit -m "chore: update models catalog"
+          git push
