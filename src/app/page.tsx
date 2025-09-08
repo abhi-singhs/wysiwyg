@@ -395,27 +395,6 @@ export default function Home() {
       }
     };
 
-  const fetchProjectFromUrl = async () => {
-    if (!projectUrl.trim()) {
-      showNotification('Enter a GitHub Project URL', 'error');
-      return;
-    }
-    const parsed = parseProjectUrl(projectUrl);
-    if (!parsed) {
-      showNotification('Invalid project URL format', 'error');
-      return;
-    }
-    if (!pat) {
-      showNotification('Authenticate first', 'error');
-      return;
-    }
-    try {
-      const p = await ghFetchProject(pat, parsed.org, parsed.number);
-      setProjectName(p.name); setProjectNumber(p.number || null); setProjectNodeId(p.id); localStorage.setItem('project-node-id', p.id);
-      localStorage.setItem('project-url', projectUrl); localStorage.setItem('project-name', p.name || ''); if (p.number != null) localStorage.setItem('project-number', String(p.number)); showNotification('Project linked', 'success');
-    } catch (e) { console.error(e); showNotification('Failed to fetch project', 'error'); }
-  };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
@@ -446,9 +425,6 @@ export default function Home() {
       localStorage.setItem('project-url', projectUrl); localStorage.setItem('project-name', p.name || ''); if (p.number != null) localStorage.setItem('project-number', String(p.number)); showNotification('Project linked', 'success');
     } catch (e) { console.error(e); showNotification('Failed to fetch project', 'error'); }
   };
-
-  // no-op usage to satisfy linter when panel hidden (kept for future triggers)
-  const _ensureFetchProjectRef = fetchProjectFromUrl;
 
   // Unauthenticated UI
   if (!user) {

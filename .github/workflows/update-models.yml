@@ -15,6 +15,18 @@ jobs:
       - name: Fetch models catalog
         run: |
           curl -sL https://models.github.ai/catalog/models > /tmp/raw.json || exit 1
+          echo '--- Begin raw models response (truncated to 2000 chars) ---'
+          node - <<'LOG'
+          const fs = require('fs');
+          try {
+            let txt = fs.readFileSync('/tmp/raw.json','utf8');
+            if (txt.length > 2000) txt = txt.slice(0,2000) + '\n...[truncated]';
+            console.log(txt);
+          } catch (e) {
+            console.log('Could not read raw.json', e.message);
+          }
+          LOG
+          echo '--- End raw models response ---'
           node - <<'EOF'
           const fs = require('fs');
           try {

@@ -164,10 +164,14 @@ export async function listModels(token: string): Promise<{ id: string; label: st
     const res = await fetch('/models-catalog.json', { cache: 'no-store' });
     if (!res.ok) throw new Error(`local catalog status ${res.status}`);
     const data: unknown = await res.json();
-    const rawList = (data && typeof data === 'object' && Array.isArray((data as any).models)) ? (data as any).models : [];
-    interface SnapshotEntry { id?: string; label?: string }
-    const cleaned = (rawList as SnapshotEntry[])
-      .filter(m => m && (m.id || m.label))
+    // Narrow unknown JSON shape to expected catalog structure without using 'any'
+    type CatalogData = { models?: unknown };
+    const catalog: CatalogData = (data && typeof data === 'object') ? (data as CatalogData) : {};
+    const rawList: Array<{ id?: string; label?: string }> = Array.isArray(catalog.models)
+      ? catalog.models.filter((m): m is { id?: string; label?: string } => !!m && typeof m === 'object')
+      : [];
+    const cleaned = rawList
+      .filter(m => (m.id || m.label))
       .map(m => ({ id: (m.id || '').trim(), label: (m.label || m.id || '').trim() }))
       .filter(m => m.id);
     if (cleaned.length) return cleaned;
