@@ -161,7 +161,7 @@ export async function listModels(token: string): Promise<{ id: string; label: st
   requireToken(token); // keep signature parity even though token not needed for static file
   try {
     // Use current URL origin for fetch
-    const url = `${window.location.origin}/models-catalog.json`;
+    const url = `${window.location.href}/models-catalog.json`;
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`local catalog status ${res.status}`);
     const data: unknown = await res.json();
