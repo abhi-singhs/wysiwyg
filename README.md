@@ -2,11 +2,18 @@
 
 A lightning-fast note-taking web application that seamlessly integrates with GitHub Issues. Perfect for Solutions Engineers who need to capture notes during meetings and quickly save them to the right repository.
 
-## 🚀 **[Try the Live Demo →](https://quicknotes.gupta-kartik.com)**
+## 🚀 **[Try the Live Demo]**
 
 **Ready to use immediately** - No installation required! Just visit [quicknotes.gupta-kartik.com](https://quicknotes.gupta-kartik.com) and start capturing notes.
 
 ![Login Page](public/login.png)
+
+```bash
+git clone https://github.com/gupta-kartik/wysiwyg.git
+cd wysiwyg
+npm install
+npm run dev
+```
 
 ## Features
 
@@ -32,13 +39,7 @@ A lightning-fast note-taking web application that seamlessly integrates with Git
 
 ## Quick Start
 
-### 🌐 **Use the Live App**
-1. Visit **[quicknotes.gupta-kartik.com](https://quicknotes.gupta-kartik.com)**
-2. Enter your GitHub Personal Access Token
-3. Start capturing notes immediately!
-
-### 💻 **Run Locally** (Optional)
-If you prefer to run it locally or contribute to the project:
+### 💻 **Run Locally** 
 
 ```bash
 git clone https://github.com/gupta-kartik/wysiwyg.git
@@ -85,7 +86,7 @@ To use the app (live or locally), you'll need a GitHub PAT:
 ## Usage
 
 ### First Time Setup
-1. **Visit [quicknotes.gupta-kartik.com](https://quicknotes.gupta-kartik.com)**
+1. **Run the app**
 2. **Enter your GitHub PAT** when prompted
 3. **Configure repository** (optional) using the settings panel
 4. You're ready to capture notes!
