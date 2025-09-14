@@ -1,5 +1,5 @@
 {
-  "updated": "2025-09-08T07:32:47.631Z",
+  "updated": "2025-09-14T00:34:09.194Z",
   "models": [
     {
       "id": "openai/gpt-4.1",
@@ -176,42 +176,6 @@
     {
       "id": "microsoft/mai-ds-r1",
       "label": "MAI-DS-R1"
-    },
-    {
-      "id": "microsoft/phi-3.5-mini-instruct",
-      "label": "Phi-3.5-mini instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3.5-moe-instruct",
-      "label": "Phi-3.5-MoE instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3.5-vision-instruct",
-      "label": "Phi-3.5-vision instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3-medium-128k-instruct",
-      "label": "Phi-3-medium instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3-medium-4k-instruct",
-      "label": "Phi-3-medium instruct (4k)"
-    },
-    {
-      "id": "microsoft/phi-3-mini-128k-instruct",
-      "label": "Phi-3-mini instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3-mini-4k-instruct",
-      "label": "Phi-3-mini instruct (4k)"
-    },
-    {
-      "id": "microsoft/phi-3-small-128k-instruct",
-      "label": "Phi-3-small instruct (128k)"
-    },
-    {
-      "id": "microsoft/phi-3-small-8k-instruct",
-      "label": "Phi-3-small instruct (8k)"
     },
     {
       "id": "microsoft/phi-4",
