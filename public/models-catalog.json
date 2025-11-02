@@ -1,5 +1,5 @@
 {
-  "updated": "2025-10-26T00:35:25.412Z",
+  "updated": "2025-11-02T00:35:54.418Z",
   "models": [
     {
       "id": "openai/gpt-4.1",
@@ -98,10 +98,6 @@
       "label": "Cohere Embed v3 Multilingual"
     },
     {
-      "id": "core42/jais-30b-chat",
-      "label": "JAIS 30b Chat"
-    },
-    {
       "id": "deepseek/deepseek-r1",
       "label": "DeepSeek-R1"
     },
@@ -150,16 +146,8 @@
       "label": "Ministral 3B"
     },
     {
-      "id": "mistral-ai/mistral-large-2411",
-      "label": "Mistral Large 24.11"
-    },
-    {
       "id": "mistral-ai/mistral-medium-2505",
       "label": "Mistral Medium 3 (25.05)"
-    },
-    {
-      "id": "mistral-ai/mistral-nemo",
-      "label": "Mistral Nemo"
     },
     {
       "id": "mistral-ai/mistral-small-2503",
