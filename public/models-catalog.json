@@ -1,5 +1,5 @@
 {
-  "updated": "2025-11-09T00:36:23.213Z",
+  "updated": "2025-11-16T00:37:11.149Z",
   "models": [
     {
       "id": "openai/gpt-4.1",
@@ -74,10 +74,6 @@
       "label": "AI21 Jamba 1.5 Large"
     },
     {
-      "id": "ai21-labs/ai21-jamba-1.5-mini",
-      "label": "AI21 Jamba 1.5 Mini"
-    },
-    {
       "id": "cohere/cohere-command-a",
       "label": "Cohere Command A"
     },
@@ -88,14 +84,6 @@
     {
       "id": "cohere/cohere-command-r-plus-08-2024",
       "label": "Cohere Command R+ 08-2024"
-    },
-    {
-      "id": "cohere/cohere-embed-v3-english",
-      "label": "Cohere Embed v3 English"
-    },
-    {
-      "id": "cohere/cohere-embed-v3-multilingual",
-      "label": "Cohere Embed v3 Multilingual"
     },
     {
       "id": "deepseek/deepseek-r1",
